@@ -18,7 +18,15 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "lantana", .module = lantana }},
         }),
     });
-    const tests = b.addTest(.{ .name = "lantana-test", .root_module = lantana });
+    const tests = b.addTest(.{
+        .name = "lantana-test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("test/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "lantana", .module = lantana }},
+        }),
+    });
     const test_step = b.step("test", "Run unit and terminal integration tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
     if (target.result.os.tag != .windows) {

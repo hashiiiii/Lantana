@@ -1,0 +1,24 @@
+diff --git a/dir b/Mode.cs b/dir b/Mode.cs
+old mode 100644
+new mode 100755
+diff --git "a/quote\"tab\t.cs" "b/quote\"tab\t.cs"
+index 90be1f3..294186e 100644
+--- "a/quote\"tab\t.cs"
++++ "b/quote\"tab\t.cs"
+@@ -1 +1 @@
+-before
++after
+diff --git a/space name.cs b/space name.cs
+index 90be1f3..294186e 100644
+--- a/space name.cs	
++++ b/space name.cs	
+@@ -1 +1 @@
+-before
++after
+diff --git "a/\346\227\245\346\234\254\350\252\236.prefab" "b/\346\227\245\346\234\254\350\252\236.prefab"
+index 90be1f3..294186e 100644
+--- "a/\346\227\245\346\234\254\350\252\236.prefab"
++++ "b/\346\227\245\346\234\254\350\252\236.prefab"
+@@ -1 +1 @@
+-before
++after

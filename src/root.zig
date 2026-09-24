@@ -1,6 +1,8 @@
 const std = @import("std");
 const terminal = @import("terminal.zig");
 
+pub const git_patch = @import("git_patch.zig");
+
 pub const Color = struct { r: u8, g: u8, b: u8 };
 
 pub const Theme = struct {

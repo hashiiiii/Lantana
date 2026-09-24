@@ -1,0 +1,24 @@
+diff --git a/Assets/Delete.prefab b/Assets/Delete.prefab
+deleted file mode 100644
+index 71779d2..0000000
+--- a/Assets/Delete.prefab
++++ /dev/null
+@@ -1 +0,0 @@
+-deleted
+diff --git a/Assets/Mode.cs b/Assets/Mode.cs
+old mode 100644
+new mode 100755
+diff --git a/Assets/New.meta b/Assets/New.meta
+new file mode 100644
+index 0000000..a8f8247
+--- /dev/null
++++ b/Assets/New.meta
+@@ -0,0 +1 @@
++guid: abc
+diff --git a/Assets/Rename.prefab b/Assets/Renamed.prefab
+similarity index 100%
+rename from Assets/Rename.prefab
+rename to Assets/Renamed.prefab
+diff --git a/Image.png b/Image.png
+index 9b3a987..d3cab9c 100644
+Binary files a/Image.png and b/Image.png differ

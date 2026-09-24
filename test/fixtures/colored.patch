@@ -1,0 +1,17 @@
+[1mdiff --git a/Assets/A.prefab b/Assets/A.prefab[m
+[1mindex 718dd1c..f7a47d4 100644[m
+[1m--- a/Assets/A.prefab[m
+[1m+++ b/Assets/A.prefab[m
+[36m@@ -1,2 +1,2 @@[m
+[31m-name: Before[m
+[32m+[m[32mname: After[m
+ count: 1[m
+[1mdiff --git a/Scripts/A.cs b/Scripts/A.cs[m
+[1mindex a869c28..0dad58b 100644[m
+[1m--- a/Scripts/A.cs[m
+[1m+++ b/Scripts/A.cs[m
+[36m@@ -1 +1,3 @@[m
+[31m-class A {}[m
+[32m+[m[32mclass A {[m
+[32m+[m[32m  // diff --git a/fake b/fake[m
+[32m+[m[32m}[m
