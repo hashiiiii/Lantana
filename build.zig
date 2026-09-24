@@ -18,6 +18,8 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "lantana", .module = lantana }},
         }),
     });
+    const example_step = b.step("example", "Install the optional Git pager example");
+    example_step.dependOn(&b.addInstallArtifact(example, .{}).step);
     const check_step = b.step("check", "Compile the pager without running terminal tests");
     check_step.dependOn(&example.step);
     const tests = b.addTest(.{

@@ -16,5 +16,7 @@
         "examples",
         "test",
         "LICENSE",
+        "README.md",
+        "THIRD_PARTY_NOTICES.md",
     },
 }
