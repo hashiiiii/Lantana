@@ -1,9 +1,14 @@
 # AGENTS
 
-- Read `docs/superpowers/specs/2026-09-25-lantana-design.md` and `docs/superpowers/plans/2026-09-25-lantana.md` before implementing the viewer.
-- Keep Lantana generic. Do not import PrefabLens code or add UnityYAML-specific behavior.
-- Accept captured Git patches. Do not rerun `git diff` to reconstruct the caller's input.
-- Preserve raw bytes and keep unsupported content visible.
-- Do not add file or content search in the first release.
-- Use real Git and terminal sessions for integration checks. Do not use mocks or stubs.
-- Do not claim Windows terminal support without a real ConPTY check.
+- Do not optimize too early
+- If a task causes difficulty, do it more frequently
+- Correct small defects before they become larger defects
+- Never compromise
+- Never assume intentions that the user did not state
+- Insert a half-width space between full-width and half-width characters
+- Do not use emoji
+- Prioritize comments in tests
+- Write comments that explain the reason
+- Do not write comments that only explain the action
+- Never use mocks or stubs
+- Do not implement a test unless you are at least 80% sure it is necessary
