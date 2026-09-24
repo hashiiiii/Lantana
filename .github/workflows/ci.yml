@@ -25,6 +25,12 @@ jobs:
       - name: Tests
         shell: bash
         run: mise exec -- zig build test --summary all
+      - name: Check Git fixtures
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mise exec -- zig build fixtures
+          git diff --exit-code -- src/fixtures
       - name: Check default package does not install the example
         shell: bash
         run: |

@@ -17,7 +17,7 @@ test "Git pager opens and closes a native ConPTY without changing the repository
     const config_before = try repo.read(".git/config");
     const result = try runConPty(arena, std.testing.io, &repo);
     try std.testing.expect(result.sent_quit);
-    try std.testing.expect(result.exit_code == 0);
+    try std.testing.expectEqual(@as(u32, 0), result.exit_code);
     try std.testing.expect(std.mem.indexOf(u8, result.transcript, "before") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.transcript, "after") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.transcript, "\x1b[?1049h") != null);

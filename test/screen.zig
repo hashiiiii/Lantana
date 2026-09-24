@@ -109,6 +109,7 @@ pub const Screen = struct {
     }
 
     fn put(self: *Screen, bytes: []const u8) void {
+        // The current live-screen cases use width-one glyphs, so each decoded code point occupies one test cell.
         if (self.row < self.height and self.col < self.width) {
             const cell = &self.cells[self.row * self.width + self.col];
             @memset(&cell.bytes, 0);
@@ -156,3 +157,13 @@ pub const Screen = struct {
         }
     }
 };
+
+test "split frame escape remains a single frame" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    var screen = try Screen.init(memory.allocator(), 4, 1);
+    // PTY reads may end inside a CSI token; losing its boundary makes later frame assertions stale.
+    try screen.feed("\x1b[?202");
+    try screen.feed("6l");
+    try std.testing.expectEqual(@as(usize, 1), screen.frame);
+}
