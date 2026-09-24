@@ -50,7 +50,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(terminal_tests).step);
 
     if (target.result.os.tag != .windows) {
-        const fixture_generator = b.addTest(.{
+        const fixture_generator = b.addExecutable(.{
             .name = "fixture-generator",
             .root_module = b.createModule(.{
                 .root_source_file = b.path("test/create_git_fixtures.zig"),

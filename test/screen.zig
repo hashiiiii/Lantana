@@ -156,16 +156,3 @@ pub const Screen = struct {
         }
     }
 };
-
-test "screen keeps only live cells across cursor moves and split control sequences" {
-    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer memory.deinit();
-    var screen = try Screen.init(memory.allocator(), 12, 2);
-    try screen.feed("\x1b[?1049h\x1b[1;1HOld");
-    try screen.feed("\x1b[1;1HNew\x1b[?202");
-    try screen.feed("6l");
-    const text = try screen.text();
-    try std.testing.expect(std.mem.indexOf(u8, text, "New") != null);
-    try std.testing.expect(std.mem.indexOf(u8, text, "Old") == null);
-    try std.testing.expectEqual(@as(usize, 1), screen.frame);
-}

@@ -1,13 +1,38 @@
 const std = @import("std");
 
+// The fixture generator is an executable, so this helper cannot use std.testing.tmpDir.
+const TempDir = struct {
+    io: std.Io,
+    dir: std.Io.Dir,
+    parent: std.Io.Dir,
+    sub_path: [std.base64.url_safe.Encoder.calcSize(12)]u8,
+
+    fn init(io: std.Io) !TempDir {
+        var parent = try std.Io.Dir.cwd().createDirPathOpen(io, ".zig-cache/tmp", .{});
+        errdefer parent.close(io);
+        var random_bytes: [12]u8 = undefined;
+        io.random(&random_bytes);
+        var sub_path: [std.base64.url_safe.Encoder.calcSize(random_bytes.len)]u8 = undefined;
+        _ = std.base64.url_safe.Encoder.encode(&sub_path, &random_bytes);
+        const dir = try parent.createDirPathOpen(io, &sub_path, .{});
+        return .{ .io = io, .dir = dir, .parent = parent, .sub_path = sub_path };
+    }
+
+    fn cleanup(self: *TempDir) void {
+        self.dir.close(self.io);
+        self.parent.deleteTree(self.io, &self.sub_path) catch {};
+        self.parent.close(self.io);
+    }
+};
+
 pub const Repo = struct {
     arena: std.mem.Allocator,
     io: std.Io,
-    temp: std.testing.TmpDir,
+    temp: TempDir,
     path: []const u8,
 
     pub fn init(arena: std.mem.Allocator, io: std.Io) !Repo {
-        var temp = std.testing.tmpDir(.{});
+        var temp = try TempDir.init(io);
         errdefer temp.cleanup();
         var path_buffer: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const count = try temp.dir.realPath(io, &path_buffer);
