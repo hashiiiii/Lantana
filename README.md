@@ -14,4 +14,4 @@ Git can start `prefablens diff-pager` through `pager.diff`. PrefabLens will read
 
 Lantana is intended to be a source dependency linked into one `prefablens` executable. It will not require users to install another program.
 
-The license will be selected before public publication.
+Lantana is licensed under the [Apache License 2.0](LICENSE).
