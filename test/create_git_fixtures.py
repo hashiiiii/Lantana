@@ -88,6 +88,12 @@ def main():
         (reverse / "Plain.cs").rename(reverse / "日本語.cs")
         save(reverse, "mixed_rename_reverse.patch", "--find-renames")
 
+        hunks = repository(root, "hunks")
+        write(hunks, "Script.cs", b"zero\none\ntwo\n\nfour\nfive\nsix\nseven\neight\nnine")
+        commit_initial(hunks)
+        write(hunks, "Script.cs", b"zero\nONE\nextra\ntwo\n\nfour\nfive\nsix\nseven\neight\nNINE")
+        save(hunks, "hunks.patch", "--unified=2")
+
         (FIXTURES / "colored.patch").write_bytes(
             git(ordinary, "-c", "color.ui=always", "diff", "--cached", "--color=always")
         )

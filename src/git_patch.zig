@@ -236,7 +236,7 @@ fn quoted(arena: std.mem.Allocator, source: []const u8) !Quoted {
     return error.InvalidPatchPath;
 }
 
-fn controlFree(arena: std.mem.Allocator, raw: []const u8) ![]const u8 {
+pub fn controlFree(arena: std.mem.Allocator, raw: []const u8) ![]const u8 {
     var clean: std.ArrayList(u8) = .empty;
     var index: usize = 0;
     while (index < raw.len) {
