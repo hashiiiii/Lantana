@@ -42,6 +42,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
+            .imports = &.{.{ .name = "vaxis", .module = vaxis_dep.module("vaxis") }},
         }),
     });
     terminal_tests.root_module.addOptions("test_options", terminal_options);

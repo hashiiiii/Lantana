@@ -1,4 +1,5 @@
 const std = @import("std");
+const vaxis = @import("vaxis");
 
 const Cell = struct {
     bytes: [4]u8 = .{ ' ', 0, 0, 0 },
@@ -109,14 +110,18 @@ pub const Screen = struct {
     }
 
     fn put(self: *Screen, bytes: []const u8) void {
-        // The current live-screen cases use width-one glyphs, so each decoded code point occupies one test cell.
+        const width: usize = @max(1, vaxis.gwidth.gwidth(bytes, .unicode));
         if (self.row < self.height and self.col < self.width) {
             const cell = &self.cells[self.row * self.width + self.col];
             @memset(&cell.bytes, 0);
             @memcpy(cell.bytes[0..bytes.len], bytes);
             cell.len = @intCast(bytes.len);
+            if (width == 2 and self.col + 1 < self.width) {
+                // The second terminal cell must not retain text from an earlier frame.
+                self.cells[self.row * self.width + self.col + 1] = .{};
+            }
         }
-        self.col += 1;
+        self.col += width;
     }
 
     fn csi(self: *Screen, raw: []const u8, final: u8) !void {
@@ -158,7 +163,7 @@ pub const Screen = struct {
     }
 };
 
-test "split frame escape remains a single frame" {
+test "split frame escape and wide glyph keep terminal columns" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     var screen = try Screen.init(memory.allocator(), 4, 1);
@@ -166,4 +171,8 @@ test "split frame escape remains a single frame" {
     try screen.feed("\x1b[?202");
     try screen.feed("6l");
     try std.testing.expectEqual(@as(usize, 1), screen.frame);
+    // A full-width path character must leave the next printable character in column three.
+    try screen.feed("日X");
+    try std.testing.expectEqual(@as(usize, 3), screen.col);
+    try std.testing.expectEqualStrings("日 X ", try screen.text());
 }
