@@ -40,5 +40,8 @@ pub fn build(b: *std.Build) void {
         const viewer_test = b.addSystemCommand(&.{ "python3", b.pathFromRoot("test/viewer_pty.py") });
         viewer_test.addArtifactArg(example);
         test_step.dependOn(&viewer_test.step);
+        const edges_test = b.addSystemCommand(&.{ "python3", b.pathFromRoot("test/viewer_edges_pty.py") });
+        edges_test.addArtifactArg(example);
+        test_step.dependOn(&edges_test.step);
     }
 }

@@ -71,6 +71,28 @@ test "renamed Git path may quote only one side" {
     try expectEqualStrings("日本語.cs", reverse.files[0].new_path.?);
 }
 
+test "rename metadata resolves an ambiguous unquoted diff header" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const patch = try parseFixture(memory.allocator(), "ambiguous_rename.patch");
+    try expectEqual(@as(usize, 1), patch.files.len);
+    // The first b/ separator also occurs inside the old path, so the header alone is ambiguous.
+    try expectEqualStrings("dir b/Old.cs", patch.files[0].old_path.?);
+    try expectEqualStrings("New.cs", patch.files[0].new_path.?);
+    try expectEqual(parser.ChangeKind.renamed, patch.files[0].kind);
+}
+
+test "hunk content cannot replace file metadata" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const patch = try parseFixture(memory.allocator(), "metadata_hunk.patch");
+    try expectEqual(@as(usize, 1), patch.files.len);
+    // Git prefixes source lines with -/+; source text can then look like ---/+++ headers.
+    try expectEqualStrings("Actual.cs", patch.files[0].old_path.?);
+    try expectEqualStrings("Actual.cs", patch.files[0].new_path.?);
+    try expectEqualStrings("Actual.cs", patch.files[0].display_path);
+}
+
 test "colored Git headers parse without changing their original bytes" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();

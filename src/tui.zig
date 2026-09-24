@@ -31,6 +31,8 @@ const View = struct {
     theme: Theme,
     focus: Focus = .tree,
     tree_scroll: usize = 0,
+    reveal_selection: bool = true,
+    last_collapsed_folder: ?usize = null,
     width: u16 = 80,
     height: u16 = 24,
 
@@ -49,9 +51,11 @@ const View = struct {
                 if (key.matches(vaxis.Key.down, .{})) {
                     try self.state.moveDown();
                     self.focus = .tree;
+                    self.reveal_selection = true;
                 } else if (key.matches(vaxis.Key.up, .{})) {
                     try self.state.moveUp();
                     self.focus = .tree;
+                    self.reveal_selection = true;
                 } else if (key.matches('m', .{})) {
                     self.state.toggleMode();
                     self.focus = .content;
@@ -82,6 +86,15 @@ const View = struct {
     }
 
     fn toggleSelectedFolder(self: *View) !void {
+        if (self.last_collapsed_folder) |index| {
+            if (!self.state.nodes[index].expanded) {
+                try self.state.toggleFolder(index);
+                self.last_collapsed_folder = null;
+                self.reveal_selection = true;
+                return;
+            }
+            self.last_collapsed_folder = null;
+        }
         const file = self.state.currentFile() orelse return;
         var parent: ?usize = null;
         for (self.state.nodes, 0..) |node, index| {
@@ -93,7 +106,11 @@ const View = struct {
                 if (parent == null or node.depth > self.state.nodes[parent.?].depth) parent = index;
             }
         }
-        if (parent) |index| try self.state.toggleFolder(index);
+        if (parent) |index| {
+            try self.state.toggleFolder(index);
+            if (!self.state.nodes[index].expanded) self.last_collapsed_folder = index;
+            self.reveal_selection = true;
+        }
     }
 
     fn handleMouse(self: *View, ctx: *vxfw.EventContext, value: vaxis.Mouse) !void {
@@ -105,6 +122,7 @@ const View = struct {
             if (x < tree_width) {
                 if (value.button == .wheel_down) self.tree_scroll +|= 1 else self.tree_scroll -|= 1;
                 self.focus = .tree;
+                self.reveal_selection = false;
             } else {
                 if (value.button == .wheel_down) self.state.scrollDown(1) else self.state.scrollUp(1);
                 self.focus = .content;
@@ -119,7 +137,13 @@ const View = struct {
             if (index < visible.len) {
                 const node_index = visible[index];
                 const node = self.state.nodes[node_index];
-                if (node.kind == .folder) try self.state.toggleFolder(node_index) else try self.state.selectFile(node.file_index.?);
+                if (node.kind == .folder) {
+                    try self.state.toggleFolder(node_index);
+                    if (self.state.nodes[node_index].expanded) {
+                        if (self.last_collapsed_folder == node_index) self.last_collapsed_folder = null;
+                    } else self.last_collapsed_folder = node_index;
+                } else try self.state.selectFile(node.file_index.?);
+                self.reveal_selection = true;
             }
             self.focus = .tree;
         } else if (x > tree_width) {
@@ -136,7 +160,7 @@ const View = struct {
         self.height = size.height;
         const surface = try vxfw.Surface.init(ctx.arena, self.widget(), size);
         if (size.width < 32 or size.height < 8) {
-            putText(surface, 1, @min(size.height -| 1, 2), size.width -| 2, 0, "Terminal too small", .{ .fg = rgb(self.theme.accent) });
+            try putText(ctx.arena, surface, 1, @min(size.height -| 1, 2), size.width -| 2, 0, "Terminal too small", .{ .fg = rgb(self.theme.accent) });
             return surface;
         }
         const tree_width = treeWidth(size.width);
@@ -144,15 +168,15 @@ const View = struct {
         const right_width = size.width - right_start;
         const foreground: vaxis.Style = .{ .fg = rgb(self.theme.foreground) };
         const accent: vaxis.Style = .{ .fg = rgb(self.theme.accent), .bold = true };
-        putText(surface, 1, 0, tree_width - 1, 0, if (self.focus == .tree) "Files *" else "Files", accent);
-        for (0..size.height) |row| putText(surface, tree_width, @intCast(row), 1, 0, "│", accent);
+        try putText(ctx.arena, surface, 1, 0, tree_width - 1, 0, if (self.focus == .tree) "Files *" else "Files", accent);
+        for (0..size.height) |row| try putText(ctx.arena, surface, tree_width, @intCast(row), 1, 0, "│", accent);
         try self.drawTree(ctx.arena, surface, tree_width);
         if (self.state.currentFile()) |file| {
-            putText(surface, right_start, 0, right_width, 0, file.display_path, accent);
+            try putText(ctx.arena, surface, right_start, 0, right_width, 0, file.display_path, accent);
             try self.drawBody(ctx.arena, surface, right_start, right_width, foreground, accent);
             try self.drawModeBar(ctx.arena, surface, right_start, right_width, foreground, accent);
         } else {
-            putText(surface, right_start, 2, right_width, 0, "No changed files", foreground);
+            try putText(ctx.arena, surface, right_start, 2, right_width, 0, "No changed files", foreground);
         }
         return surface;
     }
@@ -160,14 +184,17 @@ const View = struct {
     fn drawTree(self: *View, arena: std.mem.Allocator, surface: vxfw.Surface, width: u16) !void {
         const visible = try self.state.visibleNodes(arena);
         const viewport: usize = self.height - 2;
-        for (visible, 0..) |node_index, position| {
-            const node = self.state.nodes[node_index];
-            if (node.file_index != null and self.state.selected != null and node.file_index.? == self.state.selected.?) {
-                if (position < self.tree_scroll) self.tree_scroll = position;
-                if (position >= self.tree_scroll + viewport) self.tree_scroll = position - viewport + 1;
+        if (self.reveal_selection) {
+            for (visible, 0..) |node_index, position| {
+                const node = self.state.nodes[node_index];
+                if (node.file_index != null and self.state.selected != null and node.file_index.? == self.state.selected.?) {
+                    if (position < self.tree_scroll) self.tree_scroll = position;
+                    if (position >= self.tree_scroll + viewport) self.tree_scroll = position - viewport + 1;
+                }
             }
+            self.reveal_selection = false;
         }
-        if (self.tree_scroll >= visible.len) self.tree_scroll = visible.len -| 1;
+        self.tree_scroll = @min(self.tree_scroll, visible.len -| viewport);
         for (visible, 0..) |node_index, position| {
             if (position < self.tree_scroll or position >= self.tree_scroll + viewport) continue;
             const node = self.state.nodes[node_index];
@@ -191,7 +218,7 @@ const View = struct {
                 .unsupported => "? ",
             };
             const label = try std.fmt.allocPrint(arena, "{s}{s}", .{ prefix, node.name });
-            putText(surface, indent, row, width -| indent, 0, label, style);
+            try putText(arena, surface, indent, row, width -| indent, 0, label, style);
         }
     }
 
@@ -209,7 +236,7 @@ const View = struct {
                 else => return error.OutOfMemory,
             };
             state.document_scroll.vertical = @min(state.document_scroll.vertical, parsed.lines.len -| viewport);
-            putText(surface, x, 2, width, 0, "Document", accent);
+            try putText(arena, surface, x, 2, width, 0, "Document", accent);
             for (parsed.lines, 0..) |line, index| {
                 if (index < state.document_scroll.vertical or index >= state.document_scroll.vertical + viewport) continue;
                 drawStyledLine(surface, x, @intCast(index - state.document_scroll.vertical + 3), width, state.document_scroll.horizontal, line, self.theme);
@@ -223,22 +250,22 @@ const View = struct {
         state.raw_scroll.vertical = @min(state.raw_scroll.vertical, rows.len -| viewport);
         const fallback = rows.len == 0 or rows[0].kind == .fallback;
         if (fallback) {
-            putText(surface, x, 2, width, 0, "Captured patch", accent);
+            try putText(arena, surface, x, 2, width, 0, "Captured patch", accent);
             for (rows, 0..) |row, index| {
                 if (index < state.raw_scroll.vertical or index >= state.raw_scroll.vertical + viewport) continue;
-                if (row.before) |side| putText(surface, x, @intCast(index - state.raw_scroll.vertical + 3), width, state.raw_scroll.horizontal, side.text, foreground);
+                if (row.before) |side| try putText(arena, surface, x, @intCast(index - state.raw_scroll.vertical + 3), width, state.raw_scroll.horizontal, side.text, foreground);
             }
             return;
         }
         const half = width / 2;
-        putText(surface, x, 2, half, 0, "Before (-)", .{ .fg = rgb(self.theme.removed), .bold = true });
-        putText(surface, x + half + 1, 2, width -| half -| 1, 0, "After (+)", .{ .fg = rgb(self.theme.added), .bold = true });
-        for (3..self.height) |screen_row| putText(surface, x + half, @intCast(screen_row), 1, 0, "│", accent);
+        try putText(arena, surface, x, 2, half, 0, "Before (-)", .{ .fg = rgb(self.theme.removed), .bold = true });
+        try putText(arena, surface, x + half + 1, 2, width -| half -| 1, 0, "After (+)", .{ .fg = rgb(self.theme.added), .bold = true });
+        for (3..self.height) |screen_row| try putText(arena, surface, x + half, @intCast(screen_row), 1, 0, "│", accent);
         for (rows, 0..) |row, index| {
             if (index < state.raw_scroll.vertical or index >= state.raw_scroll.vertical + viewport) continue;
             const y: u16 = @intCast(index - state.raw_scroll.vertical + 3);
             if (row.kind == .hunk) {
-                putText(surface, x, y, width, 0, row.label, accent);
+                try putText(arena, surface, x, y, width, 0, row.label, accent);
                 continue;
             }
             drawSide(arena, surface, x, y, half, state.raw_scroll.horizontal, row.before, if (row.kind == .change) .{ .fg = rgb(self.theme.removed) } else foreground) catch return error.OutOfMemory;
@@ -254,10 +281,10 @@ const View = struct {
         else
             "[Raw]";
         const label = try std.fmt.allocPrint(arena, "{s} x:{d} y:{d}", .{ mode, scroll.horizontal, scroll.vertical });
-        putText(surface, x, 1, width, 0, label, if (self.focus == .content) accent else foreground);
+        try putText(arena, surface, x, 1, width, 0, label, if (self.focus == .content) accent else foreground);
         if (state.unavailable_reason) |reason| {
             const start: u16 = @intCast(@min(label.len + 2, width));
-            putText(surface, x + start, 1, width -| start, 0, reason, foreground);
+            try putText(arena, surface, x + start, 1, width -| start, 0, reason, foreground);
         }
     }
 };
@@ -274,12 +301,26 @@ fn fill(surface: vxfw.Surface, x: u16, y: u16, width: u16, style: vaxis.Style) v
     for (0..width) |column| surface.writeCell(x + @as(u16, @intCast(column)), y, .{ .char = .{ .grapheme = " ", .width = 1 }, .style = style });
 }
 
-fn putText(surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, value: []const u8, style: vaxis.Style) void {
+fn putText(arena: std.mem.Allocator, surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, value: []const u8, style: vaxis.Style) std.mem.Allocator.Error!void {
     if (width == 0) return;
-    var graphemes = vaxis.unicode.graphemeIterator(value);
+    const safe = try safeDisplay(arena, value);
+    var graphemes = vaxis.unicode.graphemeIterator(safe);
     var logical: usize = 0;
     while (graphemes.next()) |grapheme| {
-        const bytes = grapheme.bytes(value);
+        const bytes = grapheme.bytes(safe);
+        if (std.mem.eql(u8, bytes, "\t")) {
+            const advance = 4 - logical % 4;
+            for (0..advance) |column| {
+                const position = logical + column;
+                if (position < offset or position - offset >= width) continue;
+                surface.writeCell(x + @as(u16, @intCast(position - offset)), y, .{
+                    .char = .{ .grapheme = if (column == 0) "→" else " ", .width = 1 },
+                    .style = style,
+                });
+            }
+            logical += advance;
+            continue;
+        }
         const cells = vaxis.gwidth.gwidth(bytes, .unicode);
         if (logical + cells <= offset) {
             logical += cells;
@@ -296,13 +337,45 @@ fn putText(surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, val
     }
 }
 
+fn safeDisplay(arena: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error![]const u8 {
+    var needs_replacement = !std.unicode.utf8ValidateSlice(value);
+    for (value) |byte| {
+        if ((byte < 0x20 and byte != '\t') or byte == 0x7f) needs_replacement = true;
+    }
+    if (!needs_replacement) return value;
+    var output: std.ArrayList(u8) = .empty;
+    var index: usize = 0;
+    while (index < value.len) {
+        const byte = value[index];
+        if ((byte < 0x20 and byte != '\t') or byte == 0x7f) {
+            try output.appendSlice(arena, "�");
+            index += 1;
+            continue;
+        }
+        const length = std.unicode.utf8ByteSequenceLength(byte) catch 0;
+        if (length == 0 or index + length > value.len or
+            (std.unicode.utf8Decode(value[index .. index + length]) catch null) == null)
+        {
+            try output.appendSlice(arena, "�");
+            index += 1;
+            continue;
+        }
+        try output.appendSlice(arena, value[index .. index + length]);
+        index += length;
+    }
+    return output.toOwnedSlice(arena);
+}
+
 fn drawSide(arena: std.mem.Allocator, surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, side: ?raw_split.Side, style: vaxis.Style) !void {
     const content = side orelse return;
     const number = try std.fmt.allocPrint(arena, "{d: >4} ", .{content.number});
-    putText(surface, x, y, width, 0, number, style);
+    try putText(arena, surface, x, y, width, 0, number, style);
     if (width <= 5) return;
-    putText(surface, x + 5, y, width - 5, offset, content.text, style);
-    if (content.no_newline and content.text.len == 0) putText(surface, x + 5, y, width - 5, offset, "[no newline]", style);
+    const value = if (content.no_newline)
+        try std.fmt.allocPrint(arena, "{s}{s}[no newline]", .{ content.text, if (content.text.len == 0) "" else " " })
+    else
+        content.text;
+    try putText(arena, surface, x + 5, y, width - 5, offset, value, style);
 }
 
 fn drawStyledLine(surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, line: document.Line, theme: Theme) void {

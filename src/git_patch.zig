@@ -92,16 +92,40 @@ fn parseSection(arena: std.mem.Allocator, raw: []const u8, start: usize, end: us
     var binary = false;
     var mode = false;
     var hunk = false;
+    var rename_from: ?[]const u8 = null;
+    var rename_to: ?[]const u8 = null;
     var position = first.next;
     while (position < raw.len) {
         const line = nextLine(raw, position);
         const clean = try controlFree(arena, raw[position..line.end]);
+        if (std.mem.startsWith(u8, clean, "@@ ")) {
+            hunk = true;
+            position = line.next;
+            continue;
+        }
+        // Hunk lines can begin with the same bytes as Git metadata after their +/- prefix.
+        if (hunk) {
+            position = line.next;
+            continue;
+        }
         if (std.mem.startsWith(u8, clean, "new file mode ")) added = true;
         if (std.mem.startsWith(u8, clean, "deleted file mode ")) deleted = true;
-        if (std.mem.startsWith(u8, clean, "rename from ") or std.mem.startsWith(u8, clean, "rename to ")) renamed = true;
+        if (std.mem.startsWith(u8, clean, "rename from ")) {
+            renamed = true;
+            rename_from = decodeRenamePath(arena, clean[12..]) catch |err| switch (err) {
+                error.InvalidPatchPath => null,
+                else => return err,
+            };
+        }
+        if (std.mem.startsWith(u8, clean, "rename to ")) {
+            renamed = true;
+            rename_to = decodeRenamePath(arena, clean[10..]) catch |err| switch (err) {
+                error.InvalidPatchPath => null,
+                else => return err,
+            };
+        }
         if (std.mem.startsWith(u8, clean, "Binary files ") or std.mem.eql(u8, clean, "GIT binary patch")) binary = true;
         if (std.mem.startsWith(u8, clean, "old mode ") or std.mem.startsWith(u8, clean, "new mode ")) mode = true;
-        if (std.mem.startsWith(u8, clean, "@@ ")) hunk = true;
         if (std.mem.startsWith(u8, clean, "index ")) parseIndex(&file, clean[6..]);
         if (std.mem.startsWith(u8, clean, "--- ")) {
             file.old_path = decodePathLine(arena, clean[4..], 'a') catch |err| switch (err) {
@@ -117,6 +141,8 @@ fn parseSection(arena: std.mem.Allocator, raw: []const u8, start: usize, end: us
         }
         position = line.next;
     }
+    if (rename_from) |path| file.old_path = path;
+    if (rename_to) |path| file.new_path = path;
     if (added) file.old_path = null;
     if (deleted) file.new_path = null;
     file.display_path = file.new_path orelse file.old_path orelse "(unknown path)";
@@ -190,6 +216,15 @@ fn decodePathLine(arena: std.mem.Allocator, input: []const u8, expected: u8) !?[
         return stripPrefix(parsed.value, expected);
     }
     return stripPrefix(value, expected);
+}
+
+fn decodeRenamePath(arena: std.mem.Allocator, input: []const u8) ![]const u8 {
+    const value = std.mem.trimEnd(u8, input, "\r");
+    if (value.len == 0) return error.InvalidPatchPath;
+    if (value[0] != '"') return value;
+    const parsed = try quoted(arena, value);
+    if (std.mem.trim(u8, value[parsed.consumed..], " \t\r").len != 0) return error.InvalidPatchPath;
+    return parsed.value;
 }
 
 const Quoted = struct { value: []const u8, consumed: usize };

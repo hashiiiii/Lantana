@@ -137,6 +137,7 @@ class Session:
         self.screen = Screen()
         self.transcript = bytearray()
         self.replies = {b"\x1b[6n": 0, b"\x1b[?u": 0, b"\x1b[5n": 0}
+        self.closed = False
         self.resize(80, 24)
         self.child = os.fork()
         if self.child == 0:
@@ -208,10 +209,27 @@ class Session:
                 assert b"\x1b[?1049l" in self.transcript
                 os.close(self.master)
                 os.close(self.slave)
+                self.closed = True
                 return
         os.kill(self.child, 9)
         os.waitpid(self.child, 0)
         raise AssertionError("viewer did not quit")
+
+    def abort(self):
+        if self.closed:
+            return
+        # A failed frame assertion may leave the real Git process waiting for input.
+        try:
+            os.kill(self.child, 9)
+        except ProcessLookupError:
+            pass
+        try:
+            os.waitpid(self.child, 0)
+        except ChildProcessError:
+            pass
+        os.close(self.master)
+        os.close(self.slave)
+        self.closed = True
 
 
 def main():

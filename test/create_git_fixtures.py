@@ -88,6 +88,18 @@ def main():
         (reverse / "Plain.cs").rename(reverse / "日本語.cs")
         save(reverse, "mixed_rename_reverse.patch", "--find-renames")
 
+        ambiguous = repository(root, "ambiguous-rename")
+        write(ambiguous, "dir b/Old.cs", b"same content\n")
+        commit_initial(ambiguous)
+        (ambiguous / "dir b/Old.cs").rename(ambiguous / "New.cs")
+        save(ambiguous, "ambiguous_rename.patch", "--find-renames")
+
+        metadata = repository(root, "metadata-hunk")
+        write(metadata, "Actual.cs", b"-- a/wrong-old.cs\n")
+        commit_initial(metadata)
+        write(metadata, "Actual.cs", b"++ b/wrong-new.cs\n")
+        save(metadata, "metadata_hunk.patch")
+
         hunks = repository(root, "hunks")
         write(hunks, "Script.cs", b"zero\none\ntwo\n\nfour\nfive\nsix\nseven\neight\nnine")
         commit_initial(hunks)
