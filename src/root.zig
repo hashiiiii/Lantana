@@ -30,3 +30,10 @@ pub fn run(allocator: std.mem.Allocator, patch: []const u8, options: Options) !v
     var state = try review.Review.init(arena, parsed, options.renderer);
     try tui.run(options.io, arena, options.environ, &state, options.theme);
 }
+
+test {
+    _ = git_patch;
+    _ = raw_split;
+    _ = review;
+    _ = document;
+}

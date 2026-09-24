@@ -1,6 +1,9 @@
 const std = @import("std");
 const git_patch = @import("git_patch.zig");
 const raw_split = @import("raw_split.zig");
+const expect = std.testing.expect;
+const expectEqual = std.testing.expectEqual;
+const expectEqualStrings = std.testing.expectEqualStrings;
 
 pub const FileMetadata = struct {
     patch: []const u8,
@@ -275,4 +278,62 @@ pub const Review = struct {
 fn hasFolder(nodes: []const Node, path: []const u8) bool {
     for (nodes) |node| if (node.kind == .folder and std.mem.eql(u8, node.path, path)) return true;
     return false;
+}
+
+fn renderPatchPath(_: ?*anyopaque, arena: std.mem.Allocator, file: FileMetadata) anyerror!Document {
+    return .{ .text = try std.fmt.allocPrint(arena, "Document for {s}", .{file.new_path orelse file.old_path orelse "unknown"}) };
+}
+
+fn renderTextOnly(_: ?*anyopaque, arena: std.mem.Allocator, file: FileMetadata) anyerror!Document {
+    if (std.mem.indexOf(u8, file.patch, "Binary files") != null) return error.BinaryDocumentUnavailable;
+    return .{ .text = try std.fmt.allocPrint(arena, "{s}", .{file.new_path orelse file.old_path orelse "unknown"}) };
+}
+
+test "review tree skips folders and keeps each file mode and scroll position" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    const patch = try git_patch.parse(arena, @embedFile("fixtures/ordinary.patch"));
+    var view = try Review.init(arena, patch, .{ .render = renderPatchPath });
+    try expectEqualStrings("Assets/A.prefab", view.currentFile().?.display_path);
+    try expectEqual(Mode.document, view.currentState().?.mode);
+    try expect(view.states[0].rendered);
+    // Rendering the first selected file must not compute another file's document.
+    try expect(!view.states[1].rendered);
+    try expectEqualStrings("Assets", view.nodes[0].name);
+    try expectEqual(NodeKind.folder, view.nodes[0].kind);
+
+    view.scrollDown(3);
+    view.panRight(2);
+    view.toggleMode();
+    view.scrollDown(5);
+    try view.moveDown();
+    try expectEqualStrings("Scripts/A.cs", view.currentFile().?.display_path);
+    try expect(view.states[1].rendered);
+    try expectEqual(Mode.document, view.currentState().?.mode);
+    try view.moveUp();
+    try expectEqual(Mode.raw, view.currentState().?.mode);
+    try expectEqual(@as(usize, 5), view.currentState().?.raw_scroll.vertical);
+    try expectEqual(@as(usize, 3), view.currentState().?.document_scroll.vertical);
+    try expectEqual(@as(usize, 2), view.currentState().?.document_scroll.horizontal);
+
+    // Hiding the selected file must choose another visible file, not a folder heading.
+    try view.toggleFolder(0);
+    try expectEqualStrings("Scripts/A.cs", view.currentFile().?.display_path);
+    try view.moveUp();
+    try expectEqualStrings("Scripts/A.cs", view.currentFile().?.display_path);
+}
+
+test "renderer error keeps the original binary patch in raw mode" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    const patch = try git_patch.parse(arena, @embedFile("fixtures/kinds.patch"));
+    var view = try Review.init(arena, patch, .{ .render = renderTextOnly });
+    try view.selectFile(4);
+    try expectEqual(Mode.raw, view.currentState().?.mode);
+    try expectEqualStrings("BinaryDocumentUnavailable", view.currentState().?.unavailable_reason.?);
+    const raw = try view.currentRows();
+    try expectEqual(raw_split.RowKind.fallback, raw[0].kind);
+    try expect(std.mem.indexOf(u8, view.currentFile().?.raw, "Binary files") != null);
 }

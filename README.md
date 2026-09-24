@@ -97,6 +97,6 @@ git -c "core.pager='$(pwd)/zig-out/bin/git-pager'" -c pager.diff=true --paginate
 
 The example's `--demo-document` option displays a sample document for `.prefab` files. It does not interpret their contents. In the viewer, use Up and Down to select files, `c` to collapse or reopen a folder, `m` to switch modes, `j` and `k` to scroll, `h` and `l` to pan, and `q` to quit. Raw tabs appear as arrows. Mouse selection and resize are supported.
 
-Run `mise exec -- zig build test` for Zig and real Git PTY tests on macOS or Linux. On Windows, that command runs Zig tests; `.github/workflows/ci.yml` also runs the Git pager through ConPTY. `mise exec -- zig build check -Dtarget=x86_64-windows` checks Windows compilation from another host.
+Run `mise exec -- zig build test` for unit tests and real Git terminal tests. The terminal tests use a PTY on macOS and Linux and ConPTY on Windows. Run `mise exec -- zig build fixtures` on macOS or Linux to regenerate the committed patches with Git. `mise exec -- zig build check -Dtarget=x86_64-windows-gnu` checks Windows compilation from another host.
 
 Lantana uses the Apache License 2.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency notices.

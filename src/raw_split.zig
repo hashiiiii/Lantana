@@ -1,5 +1,8 @@
 const std = @import("std");
 const git_patch = @import("git_patch.zig");
+const expect = std.testing.expect;
+const expectEqual = std.testing.expectEqual;
+const expectEqualStrings = std.testing.expectEqualStrings;
 
 pub const RowKind = enum { hunk, context, change, fallback };
 
@@ -165,4 +168,51 @@ fn number(line: []const u8, position: *usize) !usize {
     while (position.* < line.len and std.ascii.isDigit(line[position.*])) position.* += 1;
     if (start == position.*) return error.InvalidHunk;
     return std.fmt.parseInt(usize, line[start..position.*], 10) catch error.InvalidHunk;
+}
+
+test "real Git hunks align unequal changes and preserve line numbers" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    const patch = try git_patch.parse(arena, @embedFile("fixtures/hunks.patch"));
+    const parsed = try @This().rows(arena, patch.files[0]);
+    try expectEqual(@as(usize, 10), parsed.len);
+    try expectEqual(RowKind.hunk, parsed[0].kind);
+    try expectEqualStrings("zero", parsed[1].before.?.text);
+    try expectEqual(@as(usize, 1), parsed[1].before.?.number);
+    try expectEqual(@as(usize, 1), parsed[1].after.?.number);
+    try expectEqualStrings("one", parsed[2].before.?.text);
+    try expectEqualStrings("ONE", parsed[2].after.?.text);
+    try expectEqual(@as(usize, 2), parsed[2].before.?.number);
+    try expectEqual(@as(usize, 2), parsed[2].after.?.number);
+    try expect(parsed[3].before == null);
+    try expectEqualStrings("extra", parsed[3].after.?.text);
+    try expectEqual(@as(usize, 3), parsed[3].after.?.number);
+    try expectEqualStrings("", parsed[5].before.?.text);
+    try expectEqual(@as(usize, 4), parsed[5].before.?.number);
+    try expectEqual(@as(usize, 5), parsed[5].after.?.number);
+    try expectEqual(RowKind.hunk, parsed[6].kind);
+    try expectEqualStrings("nine", parsed[9].before.?.text);
+    try expectEqualStrings("NINE", parsed[9].after.?.text);
+    try expectEqual(@as(usize, 10), parsed[9].before.?.number);
+    try expectEqual(@as(usize, 11), parsed[9].after.?.number);
+    // Git's no-newline marker describes the preceding line and consumes no line number.
+    try expect(parsed[9].before.?.no_newline);
+    try expect(parsed[9].after.?.no_newline);
+}
+
+test "binary mode-only and malformed hunks remain visible as raw rows" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    const kinds = try git_patch.parse(arena, @embedFile("fixtures/kinds.patch"));
+    for ([_]usize{ 1, 4 }) |index| {
+        const parsed = try @This().rows(arena, kinds.files[index]);
+        try expect(parsed.len > 0);
+        try expectEqual(RowKind.fallback, parsed[0].kind);
+        try expect(std.mem.startsWith(u8, parsed[0].before.?.text, "diff --git"));
+    }
+    const malformed = try git_patch.parse(arena, "diff --git a/B.cs b/B.cs\n@@ -1 +1 @@\n+new\n");
+    const parsed = try @This().rows(arena, malformed.files[0]);
+    try expectEqual(RowKind.fallback, parsed[0].kind);
 }
