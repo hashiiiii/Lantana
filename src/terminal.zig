@@ -1,56 +1,76 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const vaxis = @import("vaxis");
-const vxfw = vaxis.vxfw;
 
-pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Environ.Map, patch_size: usize) !void {
-    const label = try std.fmt.allocPrint(allocator, "PATCH BYTES: {d}", .{patch_size});
-    defer allocator.free(label);
+pub const Session = struct {
+    app: vaxis.vxfw.App,
+    console: ConsoleRedirect,
 
-    var buffer: [4096]u8 = undefined;
-    const tty = try vaxis.Tty.init(io, &buffer);
-    const vx = vaxis.init(io, allocator, environ, .{}) catch |err| {
-        tty.deinit();
-        return err;
-    };
-    var app: vxfw.App = .{
-        .io = io,
-        .allocator = allocator,
-        .tty = tty,
-        .vx = vx,
-        .timers = .empty,
-        .wants_focus = null,
-    };
-    defer app.deinit();
-    var view: View = .{ .label = label };
-    try app.run(view.widget(), .{});
-}
-
-const View = struct {
-    label: []const u8,
-
-    fn widget(self: *View) vxfw.Widget {
-        return .{ .userdata = self, .eventHandler = event, .drawFn = draw };
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Environ.Map, buffer: []u8) !Session {
+        var console = try ConsoleRedirect.init(io);
+        errdefer console.abort(io);
+        const tty = try vaxis.Tty.init(io, buffer);
+        console.transferred = true;
+        const vx = vaxis.init(io, allocator, environ, .{}) catch |err| {
+            tty.deinit();
+            return err;
+        };
+        return .{ .app = .{
+            .io = io,
+            .allocator = allocator,
+            .tty = tty,
+            .vx = vx,
+            .timers = .empty,
+            .wants_focus = null,
+        }, .console = console };
     }
 
-    fn event(_: *anyopaque, ctx: *vxfw.EventContext, value: vxfw.Event) !void {
-        switch (value) {
-            .key_press => |key| {
-                if (key.matches('q', .{})) ctx.quit = true;
-            },
-            else => {},
+    pub fn deinit(self: *Session) void {
+        self.app.deinit();
+        self.console.restore();
+    }
+};
+
+const ConsoleRedirect = struct {
+    active: bool = false,
+    transferred: bool = false,
+    original_input: ?std.os.windows.HANDLE = null,
+    original_output: ?std.os.windows.HANDLE = null,
+    input: ?std.Io.File = null,
+    output: ?std.Io.File = null,
+
+    fn init(io: std.Io) !ConsoleRedirect {
+        if (builtin.os.tag != .windows) return .{};
+        const input = try std.Io.Dir.cwd().openFile(io, "CONIN$", .{ .mode = .read_write });
+        errdefer input.close(io);
+        const output = try std.Io.Dir.cwd().openFile(io, "CONOUT$", .{ .mode = .read_write });
+        const parameters = std.os.windows.peb().ProcessParameters;
+        const self: ConsoleRedirect = .{
+            .active = true,
+            .original_input = parameters.hStdInput,
+            .original_output = parameters.hStdOutput,
+            .input = input,
+            .output = output,
+        };
+        parameters.hStdInput = input.handle;
+        parameters.hStdOutput = output.handle;
+        return self;
+    }
+
+    fn abort(self: *ConsoleRedirect, io: std.Io) void {
+        if (!self.active) return;
+        self.restore();
+        if (!self.transferred) {
+            self.input.?.close(io);
+            self.output.?.close(io);
         }
     }
 
-    fn draw(userdata: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
-        const self: *View = @ptrCast(@alignCast(userdata));
-        const size: vxfw.Size = .{ .width = ctx.max.width orelse ctx.min.width, .height = ctx.max.height orelse ctx.min.height };
-        const surface = try vxfw.Surface.init(ctx.arena, self.widget(), size);
-        if (size.height < 2 or size.width < 3) return surface;
-        for (self.label, 0..) |_, index| {
-            const column = index + 2;
-            if (column >= size.width) break;
-            surface.writeCell(@intCast(column), 1, .{ .char = .{ .grapheme = self.label[index .. index + 1], .width = 1 } });
-        }
-        return surface;
+    fn restore(self: *ConsoleRedirect) void {
+        if (!self.active) return;
+        const parameters = std.os.windows.peb().ProcessParameters;
+        parameters.hStdInput = self.original_input.?;
+        parameters.hStdOutput = self.original_output.?;
+        self.active = false;
     }
 };

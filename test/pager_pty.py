@@ -65,7 +65,7 @@ def run_pager(repo, expected):
                     if b"\x1b[5n" in chunk:
                         os.write(master, b"\x1b[0n")
                     visible = re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", transcript)
-                    if expected.replace(b" ", b"") in visible and not sent_quit:
+                    if (expected in visible or expected.replace(b" ", b"") in visible) and not sent_quit:
                         os.write(master, b"q")
                         sent_quit = True
             done, result = os.waitpid(child, os.WNOHANG)
@@ -78,6 +78,7 @@ def run_pager(repo, expected):
             raise AssertionError(f"pager timed out; output={transcript[-1000:]!r}")
         assert os.waitstatus_to_exitcode(status) == 0, transcript[-1000:]
         assert sent_quit, transcript[-1000:]
+        assert b"Example.cs" in transcript and b"before" in transcript and b"after" in transcript
         assert b"\x1b[?1049h" in transcript, "viewer did not enter alternate screen"
         assert b"\x1b[?1049l" in transcript, "viewer did not leave alternate screen"
     finally:
@@ -100,12 +101,24 @@ def main():
         git(repo, "config", "pager.diff", "true")
         git(repo, "config", "color.ui", "false")
         patch = git(repo, "--no-pager", "diff")
+        assert patch
         status_before = git(repo, "status", "--porcelain=v1")
         config_before = (repo / ".git" / "config").read_bytes()
-        run_pager(repo, f"PATCH BYTES: {len(patch)}".encode())
+        run_pager(repo, b"Before (-)")
         assert git(repo, "status", "--porcelain=v1") == status_before
         assert (repo / ".git" / "config").read_bytes() == config_before
         assert (repo / "Example.cs").read_text() == "after\n"
+        # A detached pager has no controlling terminal, so it must return the captured patch.
+        detached = subprocess.run(
+            [str(executable)], input=patch, capture_output=True, start_new_session=True, timeout=5
+        )
+        assert detached.returncode == 2, detached.stderr
+        assert detached.stdout == patch
+        assert b"\x1b[?1049h" not in detached.stdout
+        empty = subprocess.run(
+            [str(executable)], input=b"", capture_output=True, start_new_session=True, timeout=5
+        )
+        assert empty.returncode == 0 and empty.stdout == b""
 
 
 if __name__ == "__main__":

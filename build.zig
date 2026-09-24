@@ -18,6 +18,8 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "lantana", .module = lantana }},
         }),
     });
+    const check_step = b.step("check", "Compile the pager without running terminal tests");
+    check_step.dependOn(&example.step);
     const tests = b.addTest(.{
         .name = "lantana-test",
         .root_module = b.createModule(.{
@@ -33,5 +35,8 @@ pub fn build(b: *std.Build) void {
         const pager_test = b.addSystemCommand(&.{ "python3", b.pathFromRoot("test/pager_pty.py") });
         pager_test.addArtifactArg(example);
         test_step.dependOn(&pager_test.step);
+        const viewer_test = b.addSystemCommand(&.{ "python3", b.pathFromRoot("test/viewer_pty.py") });
+        viewer_test.addArtifactArg(example);
+        test_step.dependOn(&viewer_test.step);
     }
 }
