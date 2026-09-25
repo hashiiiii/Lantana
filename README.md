@@ -101,6 +101,8 @@ The example's `--demo-document` option makes a sample document available for `.p
 
 In the left pane, Up and Down visit folders and files. Left closes a folder or selects its parent; Right opens a folder. Enter toggles a folder or focuses the right pane for a file.
 
+The selected file's header shows added and removed line counts beneath its path. Drag the divider between the file tree and diff to resize both panes. In raw view, drag the divider between Before and After to change their widths.
+
 In the right pane, Up, Down, `j`, `k`, Page Up, and Page Down scroll vertically. Left, Right, `h`, and `l` pan across long lines. Trackpad gestures also pan when the terminal reports horizontal mouse events. Vertical scrolling reveals a bar at the right edge. Horizontal panning reveals a bar along the bottom when lines extend past the pane. Both bars support clicks and dragging. Click a folded range to toggle it. Drag across source text and release to copy it through OSC 52, if your terminal permits clipboard access. Raw tabs appear as arrows.
 
 Esc in the right pane returns to the left pane. Esc in the left pane opens a quit dialog with Cancel selected. `q` quits directly. Resize is supported.

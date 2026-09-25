@@ -15,6 +15,8 @@ pub const FileEntry = struct {
     kind: ChangeKind,
     old_blob: ?[]const u8 = null,
     new_blob: ?[]const u8 = null,
+    added_lines: usize = 0,
+    removed_lines: usize = 0,
 };
 
 pub const Patch = struct {
@@ -108,6 +110,8 @@ fn parseSection(arena: std.mem.Allocator, raw: []const u8, start: usize, end: us
         }
         // Hunk lines can begin with the same bytes as Git metadata after their +/- prefix.
         if (hunk) {
+            if (clean.len != 0 and clean[0] == '+') file.added_lines += 1;
+            if (clean.len != 0 and clean[0] == '-') file.removed_lines += 1;
             position = line.next;
             continue;
         }
@@ -324,6 +328,11 @@ test "ordinary Git sections retain exact bytes and do not split on hunk text" {
     try expectEqual(ChangeKind.modified, patch.files[0].kind);
     try expectEqualStrings("a869c28", patch.files[1].old_blob.?);
     try expectEqualStrings("0dad58b", patch.files[1].new_blob.?);
+    // Counts come from hunk content, so +++/--- paths and header text cannot inflate them.
+    try expectEqual(@as(usize, 1), patch.files[0].added_lines);
+    try expectEqual(@as(usize, 1), patch.files[0].removed_lines);
+    try expectEqual(@as(usize, 3), patch.files[1].added_lines);
+    try expectEqual(@as(usize, 1), patch.files[1].removed_lines);
     // A source line with a Git header prefix must not become another file section.
     try expect(std.mem.indexOf(u8, patch.files[1].raw, "+  // diff --git a/fake b/fake") != null);
     try expectEqual(@as(usize, 0), patch.files[0].start);
@@ -340,6 +349,9 @@ test "Git change kinds retain selectable additions deletions renames binary and 
     try expectEqual(ChangeKind.deleted, patch.files[0].kind);
     try expectEqual(@as(?[]const u8, null), patch.files[0].new_path);
     try expectEqual(ChangeKind.mode_only, patch.files[1].kind);
+    // A mode-only section has no changed source lines to report in the header.
+    try expectEqual(@as(usize, 0), patch.files[1].added_lines);
+    try expectEqual(@as(usize, 0), patch.files[1].removed_lines);
     try expectEqual(ChangeKind.added, patch.files[2].kind);
     try expectEqual(@as(?[]const u8, null), patch.files[2].old_path);
     try expectEqual(ChangeKind.renamed, patch.files[3].kind);
@@ -347,6 +359,15 @@ test "Git change kinds retain selectable additions deletions renames binary and 
     try expectEqualStrings("Assets/Renamed.prefab", patch.files[3].new_path.?);
     try expectEqual(ChangeKind.binary, patch.files[4].kind);
     try expectEqualStrings("Image.png", patch.files[4].display_path);
+}
+
+test "line counts include every hunk and ignore newline markers" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const patch = try parseFixture(memory.allocator(), "hunks.patch");
+    // Both separated changes belong to one file; newline markers are not source lines.
+    try expectEqual(@as(usize, 3), patch.files[0].added_lines);
+    try expectEqual(@as(usize, 2), patch.files[0].removed_lines);
 }
 
 test "Git C quoted paths decode spaces quotes tabs and Unicode" {

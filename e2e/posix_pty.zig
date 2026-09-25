@@ -21,6 +21,15 @@ fn expectUnchanged(repo: *Repo, status: []const u8, config: []const u8) !void {
     try std.testing.expectEqualStrings(config, try repo.read(".git/config"));
 }
 
+fn cellColumn(frame: []const u8, needle: []const u8) !usize {
+    var lines = std.mem.splitScalar(u8, frame, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.indexOf(u8, line, needle)) |position|
+            return std.unicode.utf8CountCodepoints(line[0..position]);
+    }
+    return error.MissingFrameText;
+}
+
 test "Git pager reads its pipe and restores the real terminal" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
@@ -163,7 +172,10 @@ test "folder focus and pane keys keep the quit dialog cancellable" {
     _ = try session.waitFrame("A.cs", mark);
     mark = session.screen.frame;
     try session.send("\x1b");
-    _ = try session.waitFrame("Quit Lantana?", mark);
+    const dialog = try session.waitFrame("Quit Lantana?", mark);
+    // The prompt belongs at the terminal center without a second, unrelated explanation.
+    try std.testing.expectEqual(@as(usize, 33), try cellColumn(dialog, "Quit Lantana?"));
+    try std.testing.expect(std.mem.indexOf(u8, dialog, "Review is read-only.") == null);
     mark = session.screen.frame;
     try session.send("\r");
     const restored = try session.waitFrame("A.cs", mark);
@@ -173,6 +185,52 @@ test "folder focus and pane keys keep the quit dialog cancellable" {
     try session.send("\x1b");
     _ = try session.waitFrame("Quit Lantana?", mark);
     try session.finishAfterInput("\x1b[C\r");
+}
+
+test "file change counts and draggable pane dividers stay aligned" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Example.cs", "before-one\n", "after-one\n");
+    defer repo.deinit();
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    const initial = try session.waitFrame("after-one", 0);
+    var lines = std.mem.splitScalar(u8, initial, '\n');
+    try std.testing.expect(std.mem.indexOf(u8, lines.next().?, "Example.cs") != null);
+    // File counts stay in the header even when the diff content changes position.
+    try std.testing.expect(std.mem.indexOf(u8, lines.next().?, "+1 -1") != null);
+    const original_before = try cellColumn(initial, "before-one");
+    const original_after = try cellColumn(initial, "after-one");
+
+    // Dragging the shared outer border changes both source columns.
+    var mark = session.screen.frame;
+    try session.drag(.{ .col = 28, .row = 10 }, .{ .col = 36, .row = 10 });
+    const wider_tree = try session.waitFrame("after-one", mark);
+    const moved_before = try cellColumn(wider_tree, "before-one");
+    const moved_after = try cellColumn(wider_tree, "after-one");
+    try std.testing.expect(moved_before > original_before);
+    try std.testing.expect(moved_after > original_after);
+
+    // The inner border changes only the After column; Before remains anchored.
+    mark = session.screen.frame;
+    try session.drag(.{ .col = 58, .row = 10 }, .{ .col = 64, .row = 10 });
+    const wider_before = try session.waitFrame("after-one", mark);
+    try std.testing.expectEqual(moved_before, try cellColumn(wider_before, "before-one"));
+    const final_after = try cellColumn(wider_before, "after-one");
+    try std.testing.expect(final_after > moved_after);
+    // Selection must follow the moved source column rather than the old split position.
+    try session.drag(.{ .col = final_after + 1, .row = 3 }, .{ .col = final_after + 5, .row = 3 });
+    try session.waitClipboard("after");
+    // Extreme drags and a narrow terminal must leave the header and both panes usable.
+    mark = session.screen.frame;
+    try session.drag(.{ .col = 36, .row = 10 }, .{ .col = 80, .row = 10 });
+    _ = try session.waitFrame("+1 -1", mark);
+    mark = session.screen.frame;
+    try session.resize(32, 8);
+    const narrow = try session.waitFrame("+1 -1", mark);
+    try std.testing.expect(std.mem.indexOf(u8, narrow, "Example.cs") != null);
+    try session.finish();
 }
 
 test "a folded unchanged range reveals real file lines when clicked" {
@@ -267,7 +325,7 @@ test "dragging diff text copies source lines without line numbers" {
     _ = try session.waitFrame("after α", 0);
 
     // The selected source retains its tab and newline without the line-number gutter.
-    try session.drag(.{ .col = 60, .row = 2 }, .{ .col = 64, .row = 3 });
+    try session.drag(.{ .col = 60, .row = 3 }, .{ .col = 64, .row = 4 });
     try session.waitClipboard("after α\tend\nsecon");
     try session.finish();
 }
@@ -386,7 +444,7 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     try session.send("m");
     _ = try session.waitFrame("Document for Assets/A.prefab", mark);
     // Document text must copy without its SGR styles or the surrounding pane.
-    try session.drag(.{ .col = 29, .row = 2 }, .{ .col = 36, .row = 2 });
+    try session.drag(.{ .col = 29, .row = 3 }, .{ .col = 36, .row = 3 });
     try session.waitClipboard("Document");
     mark = session.screen.frame;
     try session.send("m");

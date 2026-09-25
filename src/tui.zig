@@ -29,6 +29,12 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Envir
 const Focus = enum { tree, content };
 const DialogChoice = enum { cancel, quit };
 const ScrollbarAxis = enum { vertical, horizontal };
+const Divider = enum { outer, inner };
+const body_top: u16 = 2;
+const min_tree_content: u16 = 10;
+const min_diff_content: u16 = 14;
+// A raw side needs five cells for its line-number gutter and one for source text.
+const min_raw_side: u16 = 6;
 const SelectionSource = enum { before, after, fallback, document };
 const ContentSelection = struct {
     source: SelectionSource,
@@ -42,6 +48,15 @@ const SelectionArea = struct {
     width: usize,
     vertical: usize,
     horizontal: usize,
+};
+const Layout = struct {
+    outer: u16,
+    right_start: u16,
+    right_width: u16,
+    before_width: u16,
+    inner: u16,
+    after_start: u16,
+    after_width: u16,
 };
 
 const View = struct {
@@ -57,9 +72,37 @@ const View = struct {
     horizontal_scrollbar_visible: bool = false,
     scrollbar_hide_ticks: u8 = 0,
     scrollbar_dragging: ?ScrollbarAxis = null,
+    divider_dragging: ?Divider = null,
+    outer_divider: ?u16 = null,
+    inner_width: ?u16 = null,
     selection: ?ContentSelection = null,
     width: u16 = 80,
     height: u16 = 24,
+
+    fn layout(self: *const View) Layout {
+        const outer = std.math.clamp(self.outer_divider orelse treeWidth(self.width) + 1, min_tree_content + 1, self.width - min_diff_content - 2);
+        const right_start = outer + 1;
+        const right_width = self.width - right_start - 1;
+        const before_width = std.math.clamp(self.inner_width orelse right_width / 2, min_raw_side, right_width - min_raw_side - 1);
+        const inner = right_start + before_width;
+        return .{
+            .outer = outer,
+            .right_start = right_start,
+            .right_width = right_width,
+            .before_width = before_width,
+            .inner = inner,
+            .after_start = inner + 1,
+            .after_width = right_width - before_width - 1,
+        };
+    }
+
+    fn resizeDivider(self: *View, divider: Divider, column: usize) void {
+        const layout_now = self.layout();
+        switch (divider) {
+            .outer => self.outer_divider = @intCast(std.math.clamp(column, min_tree_content + 1, @as(usize, self.width - min_diff_content - 2))),
+            .inner => self.inner_width = @intCast(std.math.clamp(column -| layout_now.right_start, min_raw_side, @as(usize, layout_now.right_width - min_raw_side - 1))),
+        }
+    }
 
     fn widget(self: *View) vxfw.Widget {
         return .{ .userdata = self, .eventHandler = event, .drawFn = draw };
@@ -212,10 +255,39 @@ const View = struct {
     }
 
     fn handleMouse(self: *View, ctx: *vxfw.EventContext, value: vaxis.Mouse) !void {
+        if (self.width < 32 or self.height < 8) return;
         // Drag events need temporary row data without retaining it for the viewer's lifetime.
         var memory = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer memory.deinit();
         const arena = memory.allocator();
+        if (value.button == .left and (value.type == .press or value.type == .drag or value.type == .release)) {
+            if (self.divider_dragging) |divider| {
+                self.resizeDivider(divider, if (value.col < 0) 0 else @intCast(value.col));
+                if (value.type == .release) self.divider_dragging = null;
+                ctx.consumeAndRedraw();
+                return;
+            }
+            if (value.type == .press and value.col >= 0 and value.row >= 1 and value.row < self.height - 1) {
+                const x: u16 = @intCast(value.col);
+                const geometry = self.layout();
+                if (x == geometry.outer) {
+                    self.divider_dragging = .outer;
+                } else if (x == geometry.inner and value.row >= body_top and !self.onHorizontalScrollbar(value)) {
+                    if (self.state.currentState()) |state| {
+                        if (state.mode == .raw) {
+                            const rows = try self.state.visibleRows(arena);
+                            if (rows.len != 0 and rows[0].kind != .fallback) self.divider_dragging = .inner;
+                        }
+                    }
+                }
+                if (self.divider_dragging != null) {
+                    self.selection = null;
+                    if (self.divider_dragging == .inner) self.focus = .content;
+                    ctx.consumeAndRedraw();
+                    return;
+                }
+            }
+        }
         if (value.button == .left and (value.type == .drag or value.type == .release)) {
             if (self.selection) |*selection| {
                 if (selection.dragging) {
@@ -238,7 +310,7 @@ const View = struct {
         if (value.button == .left and (value.type == .press or value.type == .drag or value.type == .release) and
             (self.scrollbar_dragging == .vertical or (value.type == .press and value.col >= 0 and @as(usize, @intCast(value.col)) == self.width - 2 and self.scrollbar_visible)))
         {
-            const row: usize = if (value.row < 1) 1 else @min(@as(usize, @intCast(value.row)), self.height - 2);
+            const row: usize = if (value.row < body_top) body_top else @min(@as(usize, @intCast(value.row)), self.height - 2);
             try self.scrollFromScrollbar(ctx, row);
             self.scrollbar_dragging = if (value.type == .release) null else .vertical;
             self.focus = .content;
@@ -248,9 +320,9 @@ const View = struct {
         if (value.col < 0 or value.row < 0) return;
         const x: usize = @intCast(value.col);
         const y: usize = @intCast(value.row);
-        const tree_width = treeWidth(self.width);
+        const outer = self.layout().outer;
         if (value.button == .wheel_down or value.button == .wheel_up) {
-            if (x <= tree_width) {
+            if (x <= outer) {
                 if (value.button == .wheel_down) self.tree_scroll +|= 1 else self.tree_scroll -|= 1;
                 self.focus = .tree;
                 self.reveal_selection = false;
@@ -262,7 +334,7 @@ const View = struct {
             ctx.consumeAndRedraw();
             return;
         }
-        if ((value.button == .wheel_left or value.button == .wheel_right) and x > tree_width) {
+        if ((value.button == .wheel_left or value.button == .wheel_right) and x > outer) {
             if (value.button == .wheel_left) self.state.panRight(3) else self.state.panLeft(3);
             self.focus = .content;
             try self.revealScrollbar(ctx, .horizontal);
@@ -271,7 +343,7 @@ const View = struct {
         }
         if (value.type != .press or value.button != .left) return;
         self.selection = null;
-        if (x < tree_width and y >= 1 and y < self.height - 1) {
+        if (x < outer and y >= 1 and y < self.height - 1) {
             const visible = try self.state.visibleNodes(arena);
             const index = self.tree_scroll + y - 1;
             if (index < visible.len) {
@@ -283,11 +355,11 @@ const View = struct {
                 self.reveal_selection = true;
             }
             self.focus = .tree;
-        } else if (x > tree_width) {
+        } else if (x > outer) {
             self.focus = .content;
-            if (y >= 1 and y < self.height - 1) {
+            if (y >= body_top and y < self.height - 1) {
                 if (self.state.currentState()) |state| {
-                    if (state.mode == .raw and try self.state.toggleFold(state.raw_scroll.vertical + y - 1)) {
+                    if (state.mode == .raw and try self.state.toggleFold(state.raw_scroll.vertical + y - body_top)) {
                         ctx.consumeAndRedraw();
                         return;
                     }
@@ -306,7 +378,7 @@ const View = struct {
         if (!self.horizontal_scrollbar_visible or self.width < 32 or self.height < 8 or mouse.col < 0 or mouse.row < 0) return false;
         const x: usize = @intCast(mouse.col);
         const y: usize = @intCast(mouse.row);
-        return x >= treeWidth(self.width) + 2 and x < self.width - 1 and y == self.height - 2;
+        return x >= self.layout().right_start and x < self.width - 1 and y == self.height - 2;
     }
 
     fn selectionSourceAt(self: *View, arena: std.mem.Allocator, x: usize) !?SelectionSource {
@@ -327,15 +399,13 @@ const View = struct {
     fn selectionArea(self: *View, source: SelectionSource) ?SelectionArea {
         if (self.width < 32 or self.height < 8) return null;
         const state = self.state.currentState() orelse return null;
-        const right_start: usize = treeWidth(self.width) + 2;
-        const right_width: usize = self.width - right_start - 1;
-        const half = right_width / 2;
+        const geometry = self.layout();
         const raw = state.raw_scroll;
         return switch (source) {
-            .document => .{ .x = right_start, .width = right_width, .vertical = state.document_scroll.vertical, .horizontal = state.document_scroll.horizontal },
-            .fallback => .{ .x = right_start, .width = right_width, .vertical = raw.vertical, .horizontal = raw.horizontal },
-            .before => .{ .x = right_start + 5, .width = half -| 5, .vertical = raw.vertical, .horizontal = raw.horizontal },
-            .after => .{ .x = right_start + half + 6, .width = right_width -| half -| 6, .vertical = raw.vertical, .horizontal = raw.horizontal },
+            .document => .{ .x = geometry.right_start, .width = geometry.right_width, .vertical = state.document_scroll.vertical, .horizontal = state.document_scroll.horizontal },
+            .fallback => .{ .x = geometry.right_start, .width = geometry.right_width, .vertical = raw.vertical, .horizontal = raw.horizontal },
+            .before => .{ .x = geometry.right_start + 5, .width = geometry.before_width -| 5, .vertical = raw.vertical, .horizontal = raw.horizontal },
+            .after => .{ .x = geometry.after_start + 5, .width = geometry.after_width -| 5, .vertical = raw.vertical, .horizontal = raw.horizontal },
         };
     }
 
@@ -380,8 +450,8 @@ const View = struct {
         if (area.width == 0) return null;
         const lines = (try self.selectionLines(arena, source)) orelse return null;
         if (lines.len == 0) return null;
-        const screen_row = @max(@as(usize, 1), @min(y, self.height - 2));
-        const index = area.vertical + screen_row - 1;
+        const screen_row = @max(@as(usize, body_top), @min(y, self.height - 2));
+        const index = area.vertical + screen_row - body_top;
         if (index >= lines.len and !clamp) return null;
         const row = @min(index, lines.len - 1);
         const line = lines[row] orelse return null;
@@ -422,21 +492,31 @@ const View = struct {
             try putText(ctx.arena, surface, 1, @min(size.height -| 1, 2), size.width -| 2, 0, "Terminal too small", .{ .fg = rgb(self.theme.accent) });
             return surface;
         }
-        const tree_width = treeWidth(size.width);
-        const right_start = tree_width + 2;
-        const right_width = size.width - right_start - 1;
+        const geometry = self.layout();
         const foreground: vaxis.Style = .{ .fg = rgb(self.theme.foreground) };
         const accent: vaxis.Style = .{ .fg = rgb(self.theme.accent), .bold = true };
         const inactive: vaxis.Style = .{ .fg = rgb(self.theme.foreground), .dim = true };
-        drawBox(surface, 0, tree_width, 0, size.height - 1, if (self.focus == .tree and !self.dialog) accent else inactive);
-        drawBox(surface, tree_width + 1, size.width - 1, 0, size.height - 1, if (self.focus == .content and !self.dialog) accent else inactive);
-        try self.drawTree(ctx.arena, surface, tree_width - 1);
+        drawBox(surface, 0, geometry.outer, 0, size.height - 1, if (self.focus == .tree and !self.dialog) accent else inactive);
+        drawBox(surface, geometry.outer, size.width - 1, 0, size.height - 1, if (self.focus == .content and !self.dialog) accent else inactive);
+        const divider_style: vaxis.Style = if (self.divider_dragging == .outer)
+            .{ .fg = rgb(self.theme.background), .bg = rgb(self.theme.accent), .bold = true }
+        else
+            accent;
+        for (1..size.height - 1) |row| surface.writeCell(geometry.outer, @intCast(row), .{ .char = .{ .grapheme = "│", .width = 1 }, .style = divider_style });
+        surface.writeCell(geometry.outer, 0, .{ .char = .{ .grapheme = "┬", .width = 1 }, .style = accent });
+        surface.writeCell(geometry.outer, size.height - 1, .{ .char = .{ .grapheme = "┴", .width = 1 }, .style = accent });
+        try self.drawTree(ctx.arena, surface, geometry.outer - 1);
         if (self.state.currentFile()) |file| {
-            try putText(ctx.arena, surface, right_start, 0, right_width, 0, file.display_path, if (self.focus == .content) accent else foreground);
-            try self.drawBody(ctx.arena, surface, right_start, right_width, foreground, accent);
+            try putText(ctx.arena, surface, geometry.right_start, 0, geometry.right_width, 0, file.display_path, if (self.focus == .content) accent else foreground);
+            const added = try std.fmt.allocPrint(ctx.arena, "+{d}", .{file.added_lines});
+            const removed = try std.fmt.allocPrint(ctx.arena, "-{d}", .{file.removed_lines});
+            try putText(ctx.arena, surface, geometry.right_start, 1, geometry.right_width, 0, added, .{ .fg = rgb(self.theme.added), .bold = true });
+            const stats_offset: u16 = @intCast(@min(added.len + 1, geometry.right_width));
+            try putText(ctx.arena, surface, geometry.right_start + stats_offset, 1, geometry.right_width - stats_offset, 0, removed, .{ .fg = rgb(self.theme.removed), .bold = true });
+            try self.drawBody(ctx.arena, surface, geometry, foreground, accent);
             try self.paintSelection(ctx.arena, surface);
         } else {
-            try putText(ctx.arena, surface, right_start, 2, right_width, 0, "No changed files", foreground);
+            try putText(ctx.arena, surface, geometry.right_start, body_top, geometry.right_width, 0, "No changed files", foreground);
         }
         if (self.dialog) {
             for (surface.buffer) |*cell| cell.style.dim = true;
@@ -483,10 +563,10 @@ const View = struct {
     }
 
     fn scrollFromScrollbar(self: *View, ctx: *vxfw.EventContext, row: usize) !void {
-        const viewport: usize = self.height - 2;
+        const viewport: usize = self.height - body_top - 1;
         const count = try self.contentLength(ctx.alloc);
         if (count <= viewport or viewport <= 1) return;
-        const offset = ((@min(row - 1, viewport - 1)) * (count - viewport)) / (viewport - 1);
+        const offset = ((@min(row - body_top, viewport - 1)) * (count - viewport)) / (viewport - 1);
         const state = self.state.currentState() orelse return;
         const scroll = if (state.mode == .document) &state.document_scroll else &state.raw_scroll;
         scroll.vertical = offset;
@@ -498,7 +578,8 @@ const View = struct {
     fn horizontalMetrics(self: *View, arena: std.mem.Allocator) std.mem.Allocator.Error!HorizontalMetrics {
         if (self.width < 32) return .{ .viewport = 0, .max_offset = 0 };
         const state = self.state.currentState() orelse return .{ .viewport = 0, .max_offset = 0 };
-        const right_width: usize = self.width - treeWidth(self.width) - 3;
+        const geometry = self.layout();
+        const right_width: usize = geometry.right_width;
         if (state.mode == .document and state.document != null) {
             const parsed = document.parse(arena, state.document.?) catch |err| switch (err) {
                 error.InvalidDocumentText => return .{ .viewport = right_width, .max_offset = 0 },
@@ -517,8 +598,7 @@ const View = struct {
             else => return error.OutOfMemory,
         };
         const fallback = rows.len == 0 or rows[0].kind == .fallback;
-        const half = right_width / 2;
-        const viewport = if (fallback) right_width else @min(half -| 5, right_width -| half -| 6);
+        const viewport = if (fallback) right_width else @min(geometry.before_width -| 5, geometry.after_width -| 5);
         var longest: usize = 0;
         for (rows) |row| {
             if (fallback) {
@@ -539,8 +619,9 @@ const View = struct {
     fn scrollFromHorizontalScrollbar(self: *View, ctx: *vxfw.EventContext, column: usize) !void {
         const metrics = try self.horizontalMetrics(ctx.alloc);
         if (metrics.max_offset == 0) return;
-        const start: usize = treeWidth(self.width) + 2;
-        const width: usize = self.width - start - 1;
+        const geometry = self.layout();
+        const start: usize = geometry.right_start;
+        const width: usize = geometry.right_width;
         if (width <= 1) return;
         const offset = (@min(column -| start, width - 1) * metrics.max_offset) / (width - 1);
         const state = self.state.currentState() orelse return;
@@ -551,7 +632,7 @@ const View = struct {
 
     fn paintScrollbar(self: *View, arena: std.mem.Allocator, surface: vxfw.Surface) !void {
         if (!self.scrollbar_visible) return;
-        const viewport: usize = self.height - 2;
+        const viewport: usize = self.height - body_top - 1;
         const count = try self.contentLength(arena);
         if (count <= viewport or viewport == 0) return;
         const state = self.state.currentState() orelse return;
@@ -560,7 +641,7 @@ const View = struct {
         const start = (@min(scroll.vertical, count - viewport) * (viewport - thumb)) / (count - viewport);
         const column = self.width - 2;
         for (start..start + thumb) |position| {
-            const row: u16 = @intCast(position + 1);
+            const row: u16 = @intCast(position + body_top);
             var cell = surface.readCell(column, row);
             cell.style.bg = .{ .rgb = .{ 96, 97, 115 } };
             cell.default = false;
@@ -572,8 +653,9 @@ const View = struct {
         if (!self.horizontal_scrollbar_visible) return;
         const metrics = try self.horizontalMetrics(arena);
         if (metrics.max_offset == 0 or metrics.viewport == 0) return;
-        const start: usize = treeWidth(self.width) + 2;
-        const width: usize = self.width - start - 1;
+        const geometry = self.layout();
+        const start: usize = geometry.right_start;
+        const width: usize = geometry.right_width;
         const content_width = metrics.viewport + metrics.max_offset;
         const thumb = @max(@as(usize, 1), (width * metrics.viewport) / content_width);
         const state = self.state.currentState() orelse return;
@@ -598,8 +680,8 @@ const View = struct {
         const area = self.selectionArea(selection.source) orelse return;
         const lines = (try self.selectionLines(arena, selection.source)) orelse return;
         const selected = text_selection.range(selection.origin, selection.target);
-        for (1..self.height - 1) |screen_row| {
-            const row = area.vertical + screen_row - 1;
+        for (body_top..self.height - 1) |screen_row| {
+            const row = area.vertical + screen_row - body_top;
             if (row < selected.start.row or row > selected.end.row or row >= lines.len) continue;
             const line = lines[row] orelse continue;
             const start = if (row == selected.start.row) selected.start.column else 0;
@@ -657,23 +739,25 @@ const View = struct {
         }
     }
 
-    fn drawBody(self: *View, arena: std.mem.Allocator, surface: vxfw.Surface, x: u16, width: u16, foreground: vaxis.Style, accent: vaxis.Style) !void {
+    fn drawBody(self: *View, arena: std.mem.Allocator, surface: vxfw.Surface, geometry: Layout, foreground: vaxis.Style, accent: vaxis.Style) !void {
         const state = self.state.currentState() orelse return;
-        const viewport: usize = self.height - 2;
+        const x = geometry.right_start;
+        const width = geometry.right_width;
+        const viewport: usize = self.height - body_top - 1;
         if (state.mode == .document and state.document != null) {
             const parsed = document.parse(arena, state.document.?) catch |err| switch (err) {
                 error.InvalidDocumentText => {
                     state.document = null;
                     state.mode = .raw;
                     state.unavailable_reason = "Invalid document text";
-                    return self.drawBody(arena, surface, x, width, foreground, accent);
+                    return self.drawBody(arena, surface, geometry, foreground, accent);
                 },
                 else => return error.OutOfMemory,
             };
             state.document_scroll.vertical = @min(state.document_scroll.vertical, parsed.lines.len -| viewport);
             for (parsed.lines, 0..) |line, index| {
                 if (index < state.document_scroll.vertical or index >= state.document_scroll.vertical + viewport) continue;
-                drawStyledLine(surface, x, @intCast(index - state.document_scroll.vertical + 1), width, state.document_scroll.horizontal, line, self.theme);
+                drawStyledLine(surface, x, @intCast(index - state.document_scroll.vertical + body_top), width, state.document_scroll.horizontal, line, self.theme);
             }
             return;
         }
@@ -686,15 +770,18 @@ const View = struct {
         if (fallback) {
             for (rows, 0..) |row, index| {
                 if (index < state.raw_scroll.vertical or index >= state.raw_scroll.vertical + viewport) continue;
-                if (row.before) |side| try putText(arena, surface, x, @intCast(index - state.raw_scroll.vertical + 1), width, state.raw_scroll.horizontal, side.text, foreground);
+                if (row.before) |side| try putText(arena, surface, x, @intCast(index - state.raw_scroll.vertical + body_top), width, state.raw_scroll.horizontal, side.text, foreground);
             }
             return;
         }
-        const half = width / 2;
-        for (1..self.height - 1) |screen_row| try putText(arena, surface, x + half, @intCast(screen_row), 1, 0, "│", accent);
+        const divider_style: vaxis.Style = if (self.divider_dragging == .inner)
+            .{ .fg = rgb(self.theme.background), .bg = rgb(self.theme.accent), .bold = true }
+        else
+            accent;
+        for (body_top..self.height - 1) |screen_row| try putText(arena, surface, geometry.inner, @intCast(screen_row), 1, 0, "│", divider_style);
         for (rows, 0..) |row, index| {
             if (index < state.raw_scroll.vertical or index >= state.raw_scroll.vertical + viewport) continue;
-            const y: u16 = @intCast(index - state.raw_scroll.vertical + 1);
+            const y: u16 = @intCast(index - state.raw_scroll.vertical + body_top);
             if (row.kind == .fold) {
                 const style: vaxis.Style = .{ .fg = rgb(self.theme.accent), .bg = .{ .rgb = .{ 36, 35, 48 } } };
                 fill(surface, x, y, width, style);
@@ -708,8 +795,8 @@ const View = struct {
             }
             const before_style: vaxis.Style = if (row.kind == .change) .{ .fg = rgb(self.theme.foreground), .bg = rgb(mix(self.theme.background, self.theme.removed)) } else foreground;
             const after_style: vaxis.Style = if (row.kind == .change) .{ .fg = rgb(self.theme.foreground), .bg = rgb(mix(self.theme.background, self.theme.added)) } else foreground;
-            drawSide(arena, surface, x, y, half, state.raw_scroll.horizontal, row.before, before_style) catch return error.OutOfMemory;
-            drawSide(arena, surface, x + half + 1, y, width -| half -| 1, state.raw_scroll.horizontal, row.after, after_style) catch return error.OutOfMemory;
+            drawSide(arena, surface, x, y, geometry.before_width, state.raw_scroll.horizontal, row.before, before_style) catch return error.OutOfMemory;
+            drawSide(arena, surface, geometry.after_start, y, geometry.after_width, state.raw_scroll.horizontal, row.after, after_style) catch return error.OutOfMemory;
         }
     }
 
@@ -718,8 +805,9 @@ const View = struct {
         const background: vaxis.Style = .{ .fg = rgb(self.theme.foreground), .bg = .{ .rgb = .{ 36, 35, 48 } } };
         for (box.top..box.bottom + 1) |row| fill(surface, box.left, @intCast(row), box.right - box.left + 1, background);
         drawBox(surface, box.left, box.right, box.top, box.bottom, .{ .fg = rgb(self.theme.accent), .bg = background.bg });
-        try putText(arena, surface, box.left + 2, box.top + 2, box.right - box.left - 3, 0, "Quit Lantana?", .{ .fg = rgb(self.theme.foreground), .bg = background.bg, .bold = true });
-        try putText(arena, surface, box.left + 2, box.top + 3, box.right - box.left - 3, 0, "Review is read-only.", background);
+        const prompt = "Quit Lantana?";
+        const prompt_width: u16 = prompt.len;
+        try putText(arena, surface, box.left + (box.right - box.left + 1 - prompt_width) / 2, box.top + 2, prompt_width, 0, prompt, .{ .fg = rgb(self.theme.foreground), .bg = background.bg, .bold = true });
         const cancel: vaxis.Style = if (self.dialog_choice == .cancel) .{ .fg = rgb(self.theme.background), .bg = rgb(self.theme.accent), .bold = true } else background;
         const confirm: vaxis.Style = if (self.dialog_choice == .quit) .{ .fg = rgb(self.theme.background), .bg = rgb(self.theme.accent), .bold = true } else background;
         try putText(arena, surface, box.cancel, box.buttons_row, 8, 0, "[Cancel]", cancel);
@@ -730,18 +818,18 @@ const View = struct {
 const DialogGeometry = struct { left: u16, right: u16, top: u16, bottom: u16, buttons_row: u16, cancel: u16, confirm: u16 };
 
 fn dialogGeometry(width: u16, height: u16) DialogGeometry {
-    const box_width = @min(width -| 4, 32);
+    const box_width = @min(width -| 4, 28);
     const left = (width - box_width) / 2;
-    const top = (height -| 7) / 2;
-    const cancel = left + (box_width - 17) / 2;
+    const top = (height -| 6) / 2;
+    const cancel = left + (box_width - 16) / 2;
     return .{
         .left = left,
         .right = left + box_width - 1,
         .top = top,
-        .bottom = top + 6,
-        .buttons_row = top + 5,
+        .bottom = top + 5,
+        .buttons_row = top + 4,
         .cancel = cancel,
-        .confirm = cancel + 11,
+        .confirm = cancel + 10,
     };
 }
 
