@@ -226,6 +226,36 @@ test "the floating scrollbar can jump to the end of a long diff" {
     try session.finish();
 }
 
+test "horizontal trackpad scrolling reveals a draggable bottom scrollbar" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    const padding = [_]u8{'x'} ** 100;
+    const before = try std.fmt.allocPrint(arena, "before-{s}-END\n", .{padding});
+    const after = try std.fmt.allocPrint(arena, "after-{s}-END\n", .{padding});
+    var repo = try changedRepo(arena, "Wide.cs", before, after);
+    defer repo.deinit();
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("after-", 0);
+
+    // A real SGR wheel event catches missing mouse handling that keyboard panning cannot.
+    const mark = session.screen.frame;
+    try session.send("\r\x1b[<67;70;10M");
+    const panned = try session.waitFrame("━", mark);
+    try std.testing.expect(std.mem.indexOf(u8, panned, "er-") != null);
+    try std.testing.expect(std.mem.indexOf(u8, panned, "after-") == null);
+
+    // The bar must reach the end and return to the start through real mouse input.
+    var next = session.screen.frame;
+    try session.send("\x1b[<0;79;23M\x1b[<0;79;23m");
+    _ = try session.waitFrame("-END", next);
+    next = session.screen.frame;
+    try session.send("\x1b[<0;79;23M\x1b[<32;29;23M\x1b[<0;29;23m");
+    _ = try session.waitFrame("after-", next);
+    try session.finish();
+}
+
 test "dragging diff text copies source lines without line numbers" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
@@ -349,7 +379,7 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     var session = try Session.start(arena, std.testing.io, &repo, true);
     defer session.abort();
 
-    const initial = try session.waitFrame("   1 value 0", 0);
+    const initial = try session.waitFrame("   1│value 0", 0);
     try std.testing.expect(std.mem.indexOf(u8, initial, "Document for") == null);
     try std.testing.expect(std.mem.indexOf(u8, initial, "Scripts") != null);
     var mark = session.screen.frame;
@@ -360,7 +390,7 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     try session.waitClipboard("Document");
     mark = session.screen.frame;
     try session.send("m");
-    _ = try session.waitFrame("   1 value 0", mark);
+    _ = try session.waitFrame("   1│value 0", mark);
     mark = session.screen.frame;
     try session.send("jj");
     const before_pan = try session.waitFrame("value 22 after", mark);

@@ -99,7 +99,11 @@ git -c "core.pager='$(pwd)/zig-out/bin/git-pager'" -c pager.diff=true --paginate
 
 The example's `--demo-document` option makes a sample document available for `.prefab` files. Press `m` to view it. It does not interpret their contents. Choose a Nerd Font in your terminal to display the folder and extension icons. Icon selection uses a small built-in table and adds no dependency.
 
-In the left pane, Up and Down visit folders and files. Left closes a folder or selects its parent; Right opens a folder. Enter toggles a folder or focuses the right pane for a file. In the right pane, Up, Down, `j`, `k`, Page Up, and Page Down scroll; Left, Right, `h`, and `l` pan. Click a folded range to toggle it. The scrollbar appears during scrolling and supports clicks and dragging. Drag across source text in the right pane and release to copy it through OSC 52, if your terminal permits clipboard access. Esc in the right pane returns to the left pane. Esc in the left pane opens a quit dialog with Cancel selected. `q` quits directly. Resize is supported. Raw tabs appear as arrows.
+In the left pane, Up and Down visit folders and files. Left closes a folder or selects its parent; Right opens a folder. Enter toggles a folder or focuses the right pane for a file.
+
+In the right pane, Up, Down, `j`, `k`, Page Up, and Page Down scroll vertically. Left, Right, `h`, and `l` pan across long lines. Trackpad gestures also pan when the terminal reports horizontal mouse events. Vertical scrolling reveals a bar at the right edge. Horizontal panning reveals a bar along the bottom when lines extend past the pane. Both bars support clicks and dragging. Click a folded range to toggle it. Drag across source text and release to copy it through OSC 52, if your terminal permits clipboard access. Raw tabs appear as arrows.
+
+Esc in the right pane returns to the left pane. Esc in the left pane opens a quit dialog with Cancel selected. `q` quits directly. Resize is supported.
 
 To try more changes in one review, create a separate local Git repository:
 

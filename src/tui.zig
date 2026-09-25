@@ -28,6 +28,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Envir
 
 const Focus = enum { tree, content };
 const DialogChoice = enum { cancel, quit };
+const ScrollbarAxis = enum { vertical, horizontal };
 const SelectionSource = enum { before, after, fallback, document };
 const ContentSelection = struct {
     source: SelectionSource,
@@ -53,8 +54,9 @@ const View = struct {
     dialog: bool = false,
     dialog_choice: DialogChoice = .cancel,
     scrollbar_visible: bool = false,
+    horizontal_scrollbar_visible: bool = false,
     scrollbar_hide_ticks: u8 = 0,
-    scrollbar_dragging: bool = false,
+    scrollbar_dragging: ?ScrollbarAxis = null,
     selection: ?ContentSelection = null,
     width: u16 = 80,
     height: u16 = 24,
@@ -103,14 +105,16 @@ const View = struct {
                     } else return;
                 } else if (key.matches(vaxis.Key.down, .{}) or key.matches('j', .{}) or key.matches(vaxis.Key.page_down, .{})) {
                     self.state.scrollDown(if (key.matches(vaxis.Key.page_down, .{})) 10 else 1);
-                    try self.revealScrollbar(ctx);
+                    try self.revealScrollbar(ctx, .vertical);
                 } else if (key.matches(vaxis.Key.up, .{}) or key.matches('k', .{}) or key.matches(vaxis.Key.page_up, .{})) {
                     self.state.scrollUp(if (key.matches(vaxis.Key.page_up, .{})) 10 else 1);
-                    try self.revealScrollbar(ctx);
+                    try self.revealScrollbar(ctx, .vertical);
                 } else if (key.matches(vaxis.Key.right, .{}) or key.matches('l', .{})) {
                     self.state.panRight(1);
+                    try self.revealScrollbar(ctx, .horizontal);
                 } else if (key.matches(vaxis.Key.left, .{}) or key.matches('h', .{})) {
                     self.state.panLeft(1);
+                    try self.revealScrollbar(ctx, .horizontal);
                 } else return;
                 ctx.consumeAndRedraw();
             },
@@ -222,11 +226,21 @@ const View = struct {
             }
         }
         if (value.button == .left and (value.type == .press or value.type == .drag or value.type == .release) and
-            (self.scrollbar_dragging or (value.type == .press and value.col >= 0 and @as(usize, @intCast(value.col)) == self.width - 2 and self.scrollbar_visible)))
+            (self.scrollbar_dragging == .horizontal or (value.type == .press and self.onHorizontalScrollbar(value))))
+        {
+            const column: usize = if (value.col < 0) 0 else @intCast(value.col);
+            try self.scrollFromHorizontalScrollbar(ctx, column);
+            self.scrollbar_dragging = if (value.type == .release) null else .horizontal;
+            self.focus = .content;
+            ctx.consumeAndRedraw();
+            return;
+        }
+        if (value.button == .left and (value.type == .press or value.type == .drag or value.type == .release) and
+            (self.scrollbar_dragging == .vertical or (value.type == .press and value.col >= 0 and @as(usize, @intCast(value.col)) == self.width - 2 and self.scrollbar_visible)))
         {
             const row: usize = if (value.row < 1) 1 else @min(@as(usize, @intCast(value.row)), self.height - 2);
             try self.scrollFromScrollbar(ctx, row);
-            self.scrollbar_dragging = value.type != .release;
+            self.scrollbar_dragging = if (value.type == .release) null else .vertical;
             self.focus = .content;
             ctx.consumeAndRedraw();
             return;
@@ -243,8 +257,15 @@ const View = struct {
             } else {
                 if (value.button == .wheel_down) self.state.scrollDown(1) else self.state.scrollUp(1);
                 self.focus = .content;
-                try self.revealScrollbar(ctx);
+                try self.revealScrollbar(ctx, .vertical);
             }
+            ctx.consumeAndRedraw();
+            return;
+        }
+        if ((value.button == .wheel_left or value.button == .wheel_right) and x > tree_width) {
+            if (value.button == .wheel_left) self.state.panRight(3) else self.state.panLeft(3);
+            self.focus = .content;
+            try self.revealScrollbar(ctx, .horizontal);
             ctx.consumeAndRedraw();
             return;
         }
@@ -279,6 +300,13 @@ const View = struct {
             }
         }
         ctx.consumeAndRedraw();
+    }
+
+    fn onHorizontalScrollbar(self: *View, mouse: vaxis.Mouse) bool {
+        if (!self.horizontal_scrollbar_visible or self.width < 32 or self.height < 8 or mouse.col < 0 or mouse.row < 0) return false;
+        const x: usize = @intCast(mouse.col);
+        const y: usize = @intCast(mouse.row);
+        return x >= treeWidth(self.width) + 2 and x < self.width - 1 and y == self.height - 2;
     }
 
     fn selectionSourceAt(self: *View, arena: std.mem.Allocator, x: usize) !?SelectionSource {
@@ -414,7 +442,10 @@ const View = struct {
             for (surface.buffer) |*cell| cell.style.dim = true;
             try self.drawDialog(ctx.arena, surface);
         }
-        if (!self.dialog) try self.paintScrollbar(ctx.arena, surface);
+        if (!self.dialog) {
+            try self.paintScrollbar(ctx.arena, surface);
+            try self.paintHorizontalScrollbar(ctx.arena, surface);
+        }
         return surface;
     }
 
@@ -433,17 +464,21 @@ const View = struct {
         }).len;
     }
 
-    fn revealScrollbar(self: *View, ctx: *vxfw.EventContext) !void {
-        self.scrollbar_visible = true;
+    fn revealScrollbar(self: *View, ctx: *vxfw.EventContext, axis: ScrollbarAxis) !void {
+        switch (axis) {
+            .vertical => self.scrollbar_visible = true,
+            .horizontal => self.horizontal_scrollbar_visible = true,
+        }
         self.scrollbar_hide_ticks +|= 1;
         try ctx.tick(900, self.widget());
     }
 
     fn expireScrollbar(self: *View, ctx: *vxfw.EventContext) void {
         if (self.scrollbar_hide_ticks > 0) self.scrollbar_hide_ticks -= 1;
-        if (self.scrollbar_hide_ticks != 0 or !self.scrollbar_visible or self.scrollbar_dragging) return;
+        if (self.scrollbar_hide_ticks != 0 or self.scrollbar_dragging != null) return;
+        if (!self.scrollbar_visible and !self.horizontal_scrollbar_visible) return;
         self.scrollbar_visible = false;
-        self.scrollbar_dragging = false;
+        self.horizontal_scrollbar_visible = false;
         ctx.consumeAndRedraw();
     }
 
@@ -455,7 +490,63 @@ const View = struct {
         const state = self.state.currentState() orelse return;
         const scroll = if (state.mode == .document) &state.document_scroll else &state.raw_scroll;
         scroll.vertical = offset;
-        try self.revealScrollbar(ctx);
+        try self.revealScrollbar(ctx, .vertical);
+    }
+
+    const HorizontalMetrics = struct { viewport: usize, max_offset: usize };
+
+    fn horizontalMetrics(self: *View, arena: std.mem.Allocator) std.mem.Allocator.Error!HorizontalMetrics {
+        if (self.width < 32) return .{ .viewport = 0, .max_offset = 0 };
+        const state = self.state.currentState() orelse return .{ .viewport = 0, .max_offset = 0 };
+        const right_width: usize = self.width - treeWidth(self.width) - 3;
+        if (state.mode == .document and state.document != null) {
+            const parsed = document.parse(arena, state.document.?) catch |err| switch (err) {
+                error.InvalidDocumentText => return .{ .viewport = right_width, .max_offset = 0 },
+                else => return error.OutOfMemory,
+            };
+            var longest: usize = 0;
+            for (parsed.lines) |line| {
+                var width: usize = 0;
+                for (line.spans) |span| width += text_selection.width(span.text);
+                longest = @max(longest, width);
+            }
+            return .{ .viewport = right_width, .max_offset = longest -| right_width };
+        }
+        const rows = self.state.visibleRows(arena) catch |err| switch (err) {
+            error.NoSelectedFile => return .{ .viewport = 0, .max_offset = 0 },
+            else => return error.OutOfMemory,
+        };
+        const fallback = rows.len == 0 or rows[0].kind == .fallback;
+        const half = right_width / 2;
+        const viewport = if (fallback) right_width else @min(half -| 5, right_width -| half -| 6);
+        var longest: usize = 0;
+        for (rows) |row| {
+            if (fallback) {
+                if (row.before) |side| longest = @max(longest, text_selection.width(try safeDisplay(arena, side.text)));
+                continue;
+            }
+            for ([_]?raw_split.Side{ row.before, row.after }) |item| {
+                if (item) |side| {
+                    var width = text_selection.width(try safeDisplay(arena, side.text));
+                    if (side.no_newline) width += "[no newline]".len + @intFromBool(side.text.len != 0);
+                    longest = @max(longest, width);
+                }
+            }
+        }
+        return .{ .viewport = viewport, .max_offset = longest -| viewport };
+    }
+
+    fn scrollFromHorizontalScrollbar(self: *View, ctx: *vxfw.EventContext, column: usize) !void {
+        const metrics = try self.horizontalMetrics(ctx.alloc);
+        if (metrics.max_offset == 0) return;
+        const start: usize = treeWidth(self.width) + 2;
+        const width: usize = self.width - start - 1;
+        if (width <= 1) return;
+        const offset = (@min(column -| start, width - 1) * metrics.max_offset) / (width - 1);
+        const state = self.state.currentState() orelse return;
+        const scroll = if (state.mode == .document) &state.document_scroll else &state.raw_scroll;
+        scroll.horizontal = offset;
+        try self.revealScrollbar(ctx, .horizontal);
     }
 
     fn paintScrollbar(self: *View, arena: std.mem.Allocator, surface: vxfw.Surface) !void {
@@ -474,6 +565,30 @@ const View = struct {
             cell.style.bg = .{ .rgb = .{ 96, 97, 115 } };
             cell.default = false;
             surface.writeCell(column, row, cell);
+        }
+    }
+
+    fn paintHorizontalScrollbar(self: *View, arena: std.mem.Allocator, surface: vxfw.Surface) !void {
+        if (!self.horizontal_scrollbar_visible) return;
+        const metrics = try self.horizontalMetrics(arena);
+        if (metrics.max_offset == 0 or metrics.viewport == 0) return;
+        const start: usize = treeWidth(self.width) + 2;
+        const width: usize = self.width - start - 1;
+        const content_width = metrics.viewport + metrics.max_offset;
+        const thumb = @max(@as(usize, 1), (width * metrics.viewport) / content_width);
+        const state = self.state.currentState() orelse return;
+        const scroll = if (state.mode == .document) state.document_scroll else state.raw_scroll;
+        const thumb_start = (@min(scroll.horizontal, metrics.max_offset) * (width - thumb)) / metrics.max_offset;
+        const row = self.height - 2;
+        for (0..width) |position| {
+            const active = position >= thumb_start and position < thumb_start + thumb;
+            surface.writeCell(@intCast(start + position), row, .{
+                .char = .{ .grapheme = if (active) "━" else "─", .width = 1 },
+                .style = .{
+                    .fg = if (active) rgb(self.theme.accent) else .{ .rgb = .{ 96, 97, 115 } },
+                    .bg = .{ .rgb = .{ 36, 35, 48 } },
+                },
+            });
         }
     }
 
@@ -763,10 +878,12 @@ fn safeDisplay(arena: std.mem.Allocator, value: []const u8) std.mem.Allocator.Er
 
 fn drawSide(arena: std.mem.Allocator, surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, side: ?raw_split.Side, style: vaxis.Style) !void {
     const content = side orelse return;
-    if (style.bg != .default) fill(surface, x, y, width, style);
-    const number = try std.fmt.allocPrint(arena, "{d: >4} ", .{content.number});
-    try putText(arena, surface, x, y, width, 0, number, style);
+    const gutter: vaxis.Style = .{ .fg = style.fg, .dim = true };
+    const number = try std.fmt.allocPrint(arena, "{d: >4}", .{content.number});
+    try putText(arena, surface, x, y, @min(width, 4), 0, number, gutter);
+    if (width > 4) try putText(arena, surface, x + 4, y, 1, 0, "│", gutter);
     if (width <= 5) return;
+    if (style.bg != .default) fill(surface, x + 5, y, width - 5, style);
     const value = if (content.no_newline)
         try std.fmt.allocPrint(arena, "{s}{s}[no newline]", .{ content.text, if (content.text.len == 0) "" else " " })
     else
@@ -808,4 +925,21 @@ fn documentColor(color: document.Color) vaxis.Color {
         .indexed => |index| .{ .index = index },
         .rgb => |value| .{ .rgb = value },
     };
+}
+
+test "changed source highlights stop at the line-number separator" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    const surface = try vxfw.Surface.init(arena, undefined, .{ .width = 16, .height = 1 });
+    try drawSide(arena, surface, 0, 0, 16, 0, .{ .number = 7, .text = "changed" }, .{
+        .fg = .{ .rgb = .{ 220, 220, 224 } },
+        .bg = .{ .rgb = .{ 40, 30, 30 } },
+    });
+
+    // The gutter stays neutral so the color identifies source content only.
+    try std.testing.expect(surface.readCell(3, 0).style.bg == .default);
+    try std.testing.expectEqualStrings("│", surface.readCell(4, 0).char.grapheme);
+    try std.testing.expect(surface.readCell(4, 0).style.bg == .default);
+    try std.testing.expect(surface.readCell(5, 0).style.bg != .default);
 }

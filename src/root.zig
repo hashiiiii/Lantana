@@ -36,6 +36,7 @@ pub fn run(allocator: std.mem.Allocator, patch: []const u8, options: Options) !v
 }
 
 test {
+    _ = tui;
     _ = git_patch;
     _ = raw_split;
     _ = review;
