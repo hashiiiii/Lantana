@@ -23,6 +23,13 @@ pub const DocumentRenderer = struct {
     render: *const fn (?*anyopaque, std.mem.Allocator, FileMetadata) anyerror!Document,
 };
 
+pub const FileText = struct { before: []const u8, after: []const u8 };
+
+pub const FileTextProvider = struct {
+    context: ?*anyopaque = null,
+    load: *const fn (?*anyopaque, std.mem.Allocator, FileMetadata) anyerror!?FileText,
+};
+
 pub const Mode = enum { raw, document };
 pub const NodeKind = enum { folder, file };
 
@@ -54,9 +61,15 @@ pub const Review = struct {
     states: []FileState,
     nodes: []Node,
     renderer: ?DocumentRenderer,
+    file_text: ?FileTextProvider,
     selected: ?usize = null,
+    cursor: ?usize = null,
 
     pub fn init(arena: std.mem.Allocator, patch: git_patch.Patch, renderer: ?DocumentRenderer) !Review {
+        return initWithFileText(arena, patch, renderer, null);
+    }
+
+    pub fn initWithFileText(arena: std.mem.Allocator, patch: git_patch.Patch, renderer: ?DocumentRenderer, file_text: ?FileTextProvider) !Review {
         const extra: usize = @intFromBool(patch.raw_fallback != null or patch.prelude.len != 0);
         const files = try arena.alloc(git_patch.FileEntry, patch.files.len + extra);
         var offset: usize = 0;
@@ -123,6 +136,7 @@ pub const Review = struct {
             .states = states,
             .nodes = try nodes.toOwnedSlice(arena),
             .renderer = renderer,
+            .file_text = file_text,
         };
         if (self.nodes.len > 0) for (self.nodes) |node| {
             if (node.file_index) |index| {
@@ -137,18 +151,27 @@ pub const Review = struct {
         return if (self.selected) |index| self.files[index] else null;
     }
 
+    pub fn currentNode(self: *const Review) ?Node {
+        return if (self.cursor) |index| self.nodes[index] else null;
+    }
+
     pub fn currentState(self: *Review) ?*FileState {
         return if (self.selected) |index| &self.states[index] else null;
     }
 
     pub fn selectFile(self: *Review, index: usize) !void {
         if (index >= self.files.len) return error.InvalidFileIndex;
+        for (self.nodes, 0..) |node, node_index| {
+            if (node.file_index != null and node.file_index.? == index) {
+                self.cursor = node_index;
+                break;
+            }
+        }
         self.selected = index;
         const state = &self.states[index];
         if (state.rendered) return;
         state.rendered = true;
         const renderer = self.renderer orelse {
-            state.unavailable_reason = "Document renderer not configured";
             return;
         };
         const file = self.files[index];
@@ -165,7 +188,6 @@ pub const Review = struct {
         switch (document) {
             .text => |text| {
                 state.document = text;
-                state.mode = .document;
             },
             .unavailable => |reason| state.unavailable_reason = reason,
         }
@@ -174,8 +196,29 @@ pub const Review = struct {
     pub fn currentRows(self: *Review) ![]raw_split.PairRow {
         const index = self.selected orelse return error.NoSelectedFile;
         const state = &self.states[index];
-        if (state.raw_rows == null) state.raw_rows = try raw_split.rows(self.arena, self.files[index]);
+        if (state.raw_rows == null) {
+            const file = self.files[index];
+            if (self.file_text) |provider| {
+                const text = provider.load(provider.context, self.arena, .{
+                    .patch = file.raw,
+                    .old_path = file.old_path,
+                    .new_path = file.new_path,
+                    .old_blob = file.old_blob,
+                    .new_blob = file.new_blob,
+                }) catch null;
+                if (text) |value| state.raw_rows = try raw_split.fullRows(self.arena, file, value.before, value.after);
+            }
+            if (state.raw_rows == null) state.raw_rows = try raw_split.rows(self.arena, file);
+        }
         return state.raw_rows.?;
+    }
+
+    pub fn visibleRows(self: *Review, arena: std.mem.Allocator) ![]raw_split.PairRow {
+        return raw_split.visibleRows(arena, try self.currentRows());
+    }
+
+    pub fn toggleFold(self: *Review, visible_index: usize) !bool {
+        return raw_split.toggleFold(try self.currentRows(), visible_index);
     }
 
     pub fn toggleMode(self: *Review) void {
@@ -211,6 +254,7 @@ pub const Review = struct {
     pub fn toggleFolder(self: *Review, node_index: usize) !void {
         if (node_index >= self.nodes.len or self.nodes[node_index].kind != .folder) return error.InvalidFolderIndex;
         self.nodes[node_index].expanded = !self.nodes[node_index].expanded;
+        self.cursor = node_index;
         if (self.selected) |selected| {
             if (self.isFileVisible(selected)) return;
         }
@@ -219,6 +263,7 @@ pub const Review = struct {
             if (node.file_index) |file_index| {
                 if (self.isNodeVisible(index)) {
                     try self.selectFile(file_index);
+                    self.cursor = node_index;
                     break;
                 }
             }
@@ -239,22 +284,24 @@ pub const Review = struct {
         try self.move(-1);
     }
 
+    pub fn focusNode(self: *Review, node_index: usize) !void {
+        if (node_index >= self.nodes.len or !self.isNodeVisible(node_index)) return error.InvalidNodeIndex;
+        self.cursor = node_index;
+        if (self.nodes[node_index].file_index) |index| try self.selectFile(index);
+    }
+
     fn move(self: *Review, direction: isize) !void {
+        const current = self.cursor orelse return;
         var previous: ?usize = null;
-        var selected_seen = false;
-        for (self.nodes, 0..) |node, index| {
-            const file_index = node.file_index orelse continue;
+        for (self.nodes, 0..) |_, index| {
             if (!self.isNodeVisible(index)) continue;
-            if (self.selected != null and file_index == self.selected.?) {
-                selected_seen = true;
-                if (direction < 0 and previous != null) try self.selectFile(previous.?);
-                continue;
-            }
-            if (direction > 0 and selected_seen) {
-                try self.selectFile(file_index);
+            if (index == current) {
+                if (direction < 0 and previous != null) try self.focusNode(previous.?);
+            } else if (direction > 0 and previous != null and previous.? == current) {
+                try self.focusNode(index);
                 return;
             }
-            previous = file_index;
+            previous = index;
         }
     }
 
@@ -289,36 +336,49 @@ fn renderTextOnly(_: ?*anyopaque, arena: std.mem.Allocator, file: FileMetadata) 
     return .{ .text = try std.fmt.allocPrint(arena, "{s}", .{file.new_path orelse file.old_path orelse "unknown"}) };
 }
 
-test "review tree skips folders and keeps each file mode and scroll position" {
+test "review cursor visits folders and keeps each file mode and scroll position" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
     const patch = try git_patch.parse(arena, @embedFile("fixtures/ordinary.patch"));
     var view = try Review.init(arena, patch, .{ .render = renderPatchPath });
     try expectEqualStrings("Assets/A.prefab", view.currentFile().?.display_path);
-    try expectEqual(Mode.document, view.currentState().?.mode);
+    try expectEqual(Mode.raw, view.currentState().?.mode);
     try expect(view.states[0].rendered);
     // Rendering the first selected file must not compute another file's document.
     try expect(!view.states[1].rendered);
     try expectEqualStrings("Assets", view.nodes[0].name);
     try expectEqual(NodeKind.folder, view.nodes[0].kind);
+    try expectEqualStrings("A.prefab", view.currentNode().?.name);
+    try view.moveUp();
+    try expectEqualStrings("Assets", view.currentNode().?.name);
+    try expectEqualStrings("Assets/A.prefab", view.currentFile().?.display_path);
+    try view.moveDown();
 
     view.scrollDown(3);
     view.panRight(2);
     view.toggleMode();
     view.scrollDown(5);
     try view.moveDown();
+    try expectEqualStrings("Scripts", view.currentNode().?.name);
+    try expectEqualStrings("Assets/A.prefab", view.currentFile().?.display_path);
+    try view.moveDown();
     try expectEqualStrings("Scripts/A.cs", view.currentFile().?.display_path);
     try expect(view.states[1].rendered);
-    try expectEqual(Mode.document, view.currentState().?.mode);
-    try view.moveUp();
     try expectEqual(Mode.raw, view.currentState().?.mode);
-    try expectEqual(@as(usize, 5), view.currentState().?.raw_scroll.vertical);
-    try expectEqual(@as(usize, 3), view.currentState().?.document_scroll.vertical);
-    try expectEqual(@as(usize, 2), view.currentState().?.document_scroll.horizontal);
+    try view.moveUp();
+    try expectEqualStrings("Scripts", view.currentNode().?.name);
+    try view.moveUp();
+    try expectEqual(Mode.document, view.currentState().?.mode);
+    try expectEqual(@as(usize, 5), view.currentState().?.document_scroll.vertical);
+    try expectEqual(@as(usize, 3), view.currentState().?.raw_scroll.vertical);
+    try expectEqual(@as(usize, 2), view.currentState().?.raw_scroll.horizontal);
 
-    // Hiding the selected file must choose another visible file, not a folder heading.
+    // A collapsed folder keeps its own cursor while the preview chooses a visible file.
+    try view.moveUp();
+    try expectEqualStrings("Assets", view.currentNode().?.name);
     try view.toggleFolder(0);
+    try expectEqualStrings("Assets", view.currentNode().?.name);
     try expectEqualStrings("Scripts/A.cs", view.currentFile().?.display_path);
     try view.moveUp();
     try expectEqualStrings("Scripts/A.cs", view.currentFile().?.display_path);

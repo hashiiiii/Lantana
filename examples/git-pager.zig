@@ -1,5 +1,6 @@
 const std = @import("std");
 const lantana = @import("lantana");
+const GitContext = @import("git_context.zig").GitContext;
 
 const max_patch_bytes = 32 * 1024 * 1024;
 
@@ -23,10 +24,12 @@ pub fn main(init: std.process.Init) !u8 {
     }
     if (bytes.items.len == 0) return 0;
 
+    var git_context: GitContext = .{ .io = init.io };
     lantana.run(arena, bytes.items, .{
         .io = init.io,
         .environ = init.environ_map,
         .renderer = if (demo_document) .{ .render = renderDemoDocument } else null,
+        .file_text = .{ .context = &git_context, .load = GitContext.load },
     }) catch |err| {
         var output_buffer: [4096]u8 = undefined;
         var output: std.Io.File.Writer = .init(.stdout(), init.io, &output_buffer);

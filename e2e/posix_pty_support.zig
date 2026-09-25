@@ -129,7 +129,11 @@ pub const Session = struct {
     }
 
     pub fn finish(self: *Session) !void {
-        try self.send("q");
+        try self.finishAfterInput("q");
+    }
+
+    pub fn finishAfterInput(self: *Session, input: []const u8) !void {
+        try self.send(input);
         const deadline = std.Io.Clock.now(.awake, self.io).nanoseconds + 8 * std.time.ns_per_s;
         while (std.Io.Clock.now(.awake, self.io).nanoseconds < deadline) {
             try self.pump();

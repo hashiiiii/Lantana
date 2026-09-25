@@ -12,12 +12,15 @@ pub const Theme = tui.Theme;
 pub const FileMetadata = review.FileMetadata;
 pub const Document = review.Document;
 pub const DocumentRenderer = review.DocumentRenderer;
+pub const FileText = review.FileText;
+pub const FileTextProvider = review.FileTextProvider;
 
 pub const Options = struct {
     io: std.Io,
     environ: *std.process.Environ.Map,
     theme: Theme = .{},
     renderer: ?DocumentRenderer = null,
+    file_text: ?FileTextProvider = null,
 };
 
 /// The caller retains ownership of the captured patch and handles a terminal error.
@@ -27,7 +30,7 @@ pub fn run(allocator: std.mem.Allocator, patch: []const u8, options: Options) !v
     defer memory.deinit();
     const arena = memory.allocator();
     const parsed = try git_patch.parse(arena, patch);
-    var state = try review.Review.init(arena, parsed, options.renderer);
+    var state = try review.Review.initWithFileText(arena, parsed, options.renderer, options.file_text);
     try tui.run(options.io, arena, options.environ, &state, options.theme);
 }
 

@@ -31,7 +31,7 @@ test "Git pager reads its pipe and restores the real terminal" {
     const config_before = try repo.read(".git/config");
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
-    try session.waitFor("Before (-)");
+    try session.waitFor("before");
     try session.finish();
     try std.testing.expect(std.mem.indexOf(u8, session.transcript.items, "Example.cs") != null);
     try std.testing.expect(std.mem.indexOf(u8, session.transcript.items, "before") != null);
@@ -50,7 +50,7 @@ test "invalid UTF-8 remains visible and the terminal can be restored" {
     const config = try repo.read(".git/config");
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
-    const frame = try session.waitFrame("Before (-)", 0);
+    const frame = try session.waitFrame("before", 0);
     // Invalid source bytes must reach the live screen as a replacement grapheme.
     try std.testing.expect(std.mem.indexOf(u8, frame, "�") != null);
     try session.finish();
@@ -83,7 +83,7 @@ test "a line without a final newline keeps its visible marker" {
     const config = try repo.read(".git/config");
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
-    const frame = try session.waitFrame("Before (-)", 0);
+    const frame = try session.waitFrame("end [no newline]", 0);
     try std.testing.expect(std.mem.indexOf(u8, frame, "end [no newline]") != null);
     try session.finish();
     try expectUnchanged(&repo, status, config);
@@ -99,13 +99,14 @@ test "tab indentation remains distinct from spaces after horizontal panning" {
     const config = try repo.read(".git/config");
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
-    const frame = try session.waitFrame("Before (-)", 0);
+    const frame = try session.waitFrame("→   after()", 0);
     // The arrow marks a source tab even when its remaining cells are spaces.
     try std.testing.expect(std.mem.indexOf(u8, frame, "→   after()") != null);
     const mark = session.screen.frame;
-    try session.send("l");
-    const panned = try session.waitFrame("x:1", mark);
+    try session.send("\rl");
+    const panned = try session.waitFrame("after()", mark);
     try std.testing.expect(std.mem.indexOf(u8, panned, "   after()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, panned, "→") == null);
     try session.finish();
     try expectUnchanged(&repo, status, config);
 }
@@ -120,16 +121,109 @@ test "the only collapsed folder can reopen through the keyboard" {
     const config = try repo.read(".git/config");
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
-    _ = try session.waitFrame("Before (-)", 0);
+    _ = try session.waitFrame("after", 0);
     var mark = session.screen.frame;
     try session.send("c");
     _ = try session.waitFrame("No changed files", mark);
     mark = session.screen.frame;
     try session.send("c");
-    const reopened = try session.waitFrame("Before (-)", mark);
+    const reopened = try session.waitFrame("after", mark);
     try std.testing.expect(std.mem.indexOf(u8, reopened, "A.cs") != null);
     try session.finish();
     try expectUnchanged(&repo, status, config);
+}
+
+test "folder focus and pane keys keep the quit dialog cancellable" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var before: std.ArrayList(u8) = .empty;
+    var after: std.ArrayList(u8) = .empty;
+    for (0..60) |index| {
+        try before.appendSlice(arena, try std.fmt.allocPrint(arena, "old line {d:0>2}\n", .{index}));
+        try after.appendSlice(arena, try std.fmt.allocPrint(arena, "new line {d:0>2}\n", .{index}));
+    }
+    var repo = try changedRepo(arena, "Assets/A.cs", before.items, after.items);
+    defer repo.deinit();
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("new line 00", 0);
+
+    var mark = session.screen.frame;
+    try session.send("\x1b[A\x1b[D");
+    _ = try session.waitFrame("󰉋 Assets", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[C");
+    _ = try session.waitFrame(" Assets", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[B\r\x1b[6~");
+    _ = try session.waitFrame("new line 29", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b");
+    _ = try session.waitFrame("A.cs", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b");
+    _ = try session.waitFrame("Quit Lantana?", mark);
+    mark = session.screen.frame;
+    try session.send("\r");
+    const restored = try session.waitFrame("A.cs", mark);
+    try std.testing.expect(std.mem.indexOf(u8, restored, "Quit Lantana?") == null);
+    // Confirm must end the real pager; a direct q would hide a broken dialog choice.
+    mark = session.screen.frame;
+    try session.send("\x1b");
+    _ = try session.waitFrame("Quit Lantana?", mark);
+    try session.finishAfterInput("\x1b[C\r");
+}
+
+test "a folded unchanged range reveals real file lines when clicked" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var before: std.ArrayList(u8) = .empty;
+    var after: std.ArrayList(u8) = .empty;
+    for (0..60) |index| {
+        try before.appendSlice(arena, try std.fmt.allocPrint(arena, "line {d:0>2}\n", .{index}));
+        try after.appendSlice(arena, try std.fmt.allocPrint(arena, "{s} {d:0>2}\n", .{ if (index == 2 or index == 49) "changed" else "line", index }));
+    }
+    var repo = try changedRepo(arena, "A.cs", before.items, after.items);
+    defer repo.deinit();
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    const initial = try session.waitFrame("unchanged lines", 0);
+    try std.testing.expect(std.mem.indexOf(u8, initial, "line 07") == null);
+    const position = std.mem.indexOf(u8, initial, "unchanged lines") orelse return error.MissingFold;
+    const row = std.mem.count(u8, initial[0..position], "\n") + 1;
+    const click = try std.fmt.allocPrint(arena, "\x1b[<0;40;{d}M\x1b[<0;40;{d}m", .{ row, row });
+    const mark = session.screen.frame;
+    try session.send(click);
+    _ = try session.waitFrame("line 07", mark);
+    try session.finish();
+}
+
+test "the floating scrollbar can jump to the end of a long diff" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var before: std.ArrayList(u8) = .empty;
+    var after: std.ArrayList(u8) = .empty;
+    for (0..80) |index| {
+        try before.appendSlice(arena, try std.fmt.allocPrint(arena, "old line {d:0>2}\n", .{index}));
+        try after.appendSlice(arena, try std.fmt.allocPrint(arena, "new line {d:0>2}\n", .{index}));
+    }
+    var repo = try changedRepo(arena, "A.cs", before.items, after.items);
+    defer repo.deinit();
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("new line 00", 0);
+    try session.send("\r\x1b[<65;70;10M");
+    const mark = session.screen.frame;
+    try session.send("\x1b[<0;79;23M\x1b[<0;79;23m");
+    _ = try session.waitFrame("new line 79", mark);
+    const drag_mark = session.screen.frame;
+    // Dragging continues after the pointer leaves the narrow scrollbar column.
+    try session.send("\x1b[<0;79;23M\x1b[<32;75;2M\x1b[<0;75;2m");
+    _ = try session.waitFrame("new line 00", drag_mark);
+    try session.finish();
 }
 
 test "mouse wheel scroll can move the selected file outside the visible tree" {
@@ -146,7 +240,7 @@ test "mouse wheel scroll can move the selected file outside the visible tree" {
     const config = try repo.read(".git/config");
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
-    _ = try session.waitFrame("Before (-)", 0);
+    _ = try session.waitFrame("after", 0);
     const mark = session.screen.frame;
     for (0..15) |_| try session.send("\x1b[<65;8;5M");
     const visible = try session.waitFrame("29.cs", mark);
@@ -204,10 +298,10 @@ test "Git pager shows added deleted renamed binary mode and quoted path changes"
     try session.send("\x1b[B");
     _ = try session.waitFrame("guid: new", mark);
     mark = session.screen.frame;
-    try session.send("\x1b[B");
+    try session.send("\x1b[B\x1b[B");
     _ = try session.waitFrame("Binary files", mark);
     mark = session.screen.frame;
-    try session.send("\x1b[B");
+    try session.send("\x1b[B\x1b[B");
     const quoted = try session.waitFrame("after", mark);
     try std.testing.expect(std.mem.indexOf(u8, quoted, "file.cs") != null);
     try session.finish();
@@ -239,20 +333,26 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     var session = try Session.start(arena, std.testing.io, &repo, true);
     defer session.abort();
 
-    const initial = try session.waitFrame("Document for Assets/A.prefab", 0);
-    try std.testing.expect(std.mem.indexOf(u8, initial, "Before (-)") == null);
+    const initial = try session.waitFrame("   1 value 0", 0);
+    try std.testing.expect(std.mem.indexOf(u8, initial, "Document for") == null);
     try std.testing.expect(std.mem.indexOf(u8, initial, "Scripts") != null);
     var mark = session.screen.frame;
     try session.send("m");
-    _ = try session.waitFrame("Before (-)", mark);
+    _ = try session.waitFrame("Document for Assets/A.prefab", mark);
+    mark = session.screen.frame;
+    try session.send("m");
+    _ = try session.waitFrame("   1 value 0", mark);
     mark = session.screen.frame;
     try session.send("jj");
-    const before_pan = try session.waitFrame("y:2", mark);
+    const before_pan = try session.waitFrame("value 22 after", mark);
     mark = session.screen.frame;
     try session.send("ll");
-    const after_pan = try session.waitFrame("x:2", mark);
+    const after_pan = try session.waitFrame("lue 22 after", mark);
     // A changed offset label alone would not prove that the source columns moved.
     try std.testing.expect(!std.mem.eql(u8, bodyRows(before_pan), bodyRows(after_pan)));
+    mark = session.screen.frame;
+    try session.send("\x1b");
+    _ = try session.waitFrame("A.prefab", mark);
     mark = session.screen.frame;
     try session.send("\x1b[B");
     const metadata = try session.waitFrame("Assets/B.meta", mark);
@@ -262,13 +362,13 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     const binary = try session.waitFrame("Image.png", mark);
     try std.testing.expect(std.mem.indexOf(u8, binary, "Binary files") != null);
     mark = session.screen.frame;
-    try session.send("\x1b[B");
+    try session.send("\x1b[B\x1b[B\x1b[B");
     _ = try session.waitFrame("Scripts/C.cs", mark);
     mark = session.screen.frame;
-    try session.send("\x1b[<0;8;3M\x1b[<0;8;3m");
+    try session.send("\x1b[<0;8;2M\x1b[<0;8;2m\x1b[<0;8;3M\x1b[<0;8;3m");
     _ = try session.waitFrame("A.prefab", mark);
     mark = session.screen.frame;
-    try session.send("\x1b[<0;8;5M\x1b[<0;8;5m");
+    try session.send("\x1b[<0;8;4M\x1b[<0;8;4m");
     _ = try session.waitFrame("Assets/B.meta", mark);
     mark = session.screen.frame;
     try session.resize(48, 16);

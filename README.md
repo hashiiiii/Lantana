@@ -1,6 +1,6 @@
 # Lantana
 
-Lantana is a Zig library for reviewing a captured Git patch in a terminal. It shows changed files in a collapsible tree and aligns ordinary text hunks in Before and After columns. A caller may supply a full-width document for a selected file. Lantana does not run Git or change the repository.
+Lantana is a Zig library for reviewing a captured Git patch in a terminal. It shows changed files in a collapsible tree and aligns text lines in two columns. Changed lines have tinted backgrounds. A caller may supply a document or complete file text for a selected file. Lantana does not run Git or change the repository.
 
 The package targets Zig 0.16.0. Release support is pending terminal checks on all target platforms and integration with its first consumer.
 
@@ -66,6 +66,8 @@ An empty patch returns without entering the alternate screen. The caller handles
 
 The Git pager receives the patch through standard input. Lantana opens terminal input separately, using `/dev/tty` on POSIX and console handles on Windows. The caller owns Git configuration, patch capture, and any source recovery.
 
+Set `Options.file_text` to a `FileTextProvider` when the viewer should reveal lines omitted from the patch. The callback receives `FileMetadata` and returns the full before and after text. Lantana checks that the supplied text matches every captured hunk before it folds unchanged ranges. If the text is missing or stale, the captured patch remains visible. The example pager reads Git blobs and checks a working tree file's object ID before using it.
+
 ## Render a document
 
 Set `Options.renderer` to a `DocumentRenderer`. Lantana calls it when a file is selected. `FileMetadata` contains the exact patch section, old and new paths, and available blob IDs. The callback may return `.text` with ANSI SGR styles or `.unavailable` with a reason:
@@ -84,7 +86,7 @@ fn renderDocument(
 const renderer: lantana.DocumentRenderer = .{ .render = renderDocument };
 ```
 
-Allocate returned text for the supplied allocator, or return text that stays valid until `run` returns. Lantana strips unsupported control sequences before drawing. A renderer error, unavailable result, or invalid document opens the raw patch with a visible reason. It retains unsupported Git sections as captured text.
+Allocate returned text for the supplied allocator, or return text that stays valid until `run` returns. Lantana strips unsupported control sequences before drawing. Raw diff is the initial view; press `m` to show a supplied document. A renderer error, unavailable result, or invalid document keeps the raw patch visible with a reason. Unsupported Git sections remain available as captured text.
 
 `Theme` accepts plain RGB `Color` values for foreground, background, accent, removed lines, and added lines. Its defaults work without configuration. The public renderer and theme interface contains no `libvaxis` types.
 
@@ -95,7 +97,9 @@ mise exec -- zig build example
 git -c "core.pager='$(pwd)/zig-out/bin/git-pager'" -c pager.diff=true --paginate diff
 ```
 
-The example's `--demo-document` option displays a sample document for `.prefab` files. It does not interpret their contents. In the viewer, use Up and Down to select files, `c` to collapse or reopen a folder, `m` to switch modes, `j` and `k` to scroll, `h` and `l` to pan, and `q` to quit. Raw tabs appear as arrows. Mouse selection and resize are supported.
+The example's `--demo-document` option makes a sample document available for `.prefab` files. Press `m` to view it. It does not interpret their contents. Choose a Nerd Font in your terminal to display the folder and file icons.
+
+In the left pane, Up and Down visit folders and files. Left closes a folder or selects its parent; Right opens a folder. Enter toggles a folder or focuses the right pane for a file. In the right pane, Up, Down, `j`, `k`, Page Up, and Page Down scroll; Left, Right, `h`, and `l` pan. Click a folded range to reveal it, or scroll it to the top and press Enter. The scrollbar appears during scrolling and supports clicks and dragging. Esc in the right pane returns to the left pane. Esc in the left pane opens a quit dialog with Cancel selected. `q` quits directly. Mouse selection and resize are supported. Raw tabs appear as arrows.
 
 To try more changes in one review, create a separate local Git repository:
 
