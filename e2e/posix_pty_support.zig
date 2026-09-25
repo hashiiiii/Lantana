@@ -173,7 +173,7 @@ pub const DetachedResult = struct { status: c_int, output: []const u8 };
 
 pub fn bodyRows(frame: []const u8) []const u8 {
     var position: usize = 0;
-    for (0..3) |_| {
+    for (0..2) |_| {
         const next = std.mem.indexOfScalarPos(u8, frame, position, '\n') orelse return "";
         position = next + 1;
     }

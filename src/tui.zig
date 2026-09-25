@@ -31,7 +31,7 @@ const DialogChoice = enum { cancel, quit };
 const ScrollbarAxis = enum { vertical, horizontal };
 const Divider = enum { outer, inner };
 const stats_row: u16 = 1;
-const body_top: u16 = stats_row + 2;
+const body_top: u16 = stats_row + 1;
 const min_tree_content: u16 = 10;
 const min_diff_content: u16 = 14;
 // A raw side needs five cells for its line-number gutter and one for source text.
