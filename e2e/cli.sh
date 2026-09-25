@@ -69,6 +69,18 @@ cd ..
 if git config --local --no-includes --get include.path >/dev/null; then fail "project setup included a tracked config"; fi
 "$binary" setup --project
 [ "$(git config --local --no-includes --get-all pager.diff | wc -l | tr -d ' ')" = 1 ] || fail "repeated project setup added another pager"
+# A clone receives the preference file, then activates the fixed command in its own config.
+git add .lantana.gitconfig
+git -c user.name=Lantana -c user.email=lantana@example.com commit -qm "Record project pager"
+git clone -q "$scratch/project" "$scratch/project-clone"
+cd "$scratch/project-clone"
+if git config --local --get pager.diff >/dev/null; then fail "clone unexpectedly inherited the pager"; fi
+[ "$(git config --file .lantana.gitconfig --get pager.diff)" = lantana ] || fail "clone is missing the project preference"
+"$binary" setup --project
+[ "$(git config --local --get pager.diff)" = lantana ] || fail "clone did not activate the project preference"
+"$binary" unset --project
+if git config --local --get pager.diff >/dev/null; then fail "clone project unset left pager.diff"; fi
+cd "$scratch/project"
 "$binary" unset --project
 if git config --get pager.diff >/dev/null; then fail "project unset left pager.diff"; fi
 [ ! -e .lantana.gitconfig ] || fail "project unset left the generated config"

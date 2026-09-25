@@ -43,7 +43,7 @@ pub fn main(init: std.process.Init) !u8 {
                 error.ExistingPager => std.log.err("pager.diff already has a setting in this scope", .{}),
                 error.NotLantanaPager => std.log.err("pager.diff is not set to lantana in this scope", .{}),
                 error.MultipleValues => std.log.err("Git configuration has multiple values for the same setting", .{}),
-                error.RequiresRepository => std.log.err("project setup requires a Git working tree", .{}),
+                error.RequiresRepository => std.log.err("project scope requires a Git working tree", .{}),
                 else => std.log.err("Git configuration failed: {s}", .{@errorName(err)}),
             }
             return 2;
