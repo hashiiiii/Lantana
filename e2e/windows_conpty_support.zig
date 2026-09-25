@@ -210,8 +210,11 @@ pub fn runConPty(arena: std.mem.Allocator, io: std.Io, repo: *Repo) !Result {
             }
             if (!sent_quit) {
                 const visible = try visibleText(arena, transcript.items);
-                if (std.mem.indexOf(u8, visible, "Before (-)") != null and
-                    std.mem.indexOf(u8, visible, "Example.cs") != null)
+                // Both numbered columns must be painted before the test asks the viewer to quit.
+                if (std.mem.indexOf(u8, transcript.items, "\x1b[?1049h") != null and
+                    std.mem.indexOf(u8, visible, "Example.cs") != null and
+                    std.mem.indexOf(u8, visible, "   1 before") != null and
+                    std.mem.indexOf(u8, visible, "   1 after") != null)
                 {
                     try writePipe(input_write, "q");
                     sent_quit = true;
