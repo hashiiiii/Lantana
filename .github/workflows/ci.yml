@@ -21,7 +21,7 @@ jobs:
       - uses: jdx/mise-action@v4
       - name: Format
         shell: bash
-        run: mise exec -- zig fmt --check build.zig src examples test
+        run: mise exec -- zig fmt --check build.zig build.zig.zon src examples e2e tools
       - name: Tests
         shell: bash
         run: mise exec -- zig build test --summary all

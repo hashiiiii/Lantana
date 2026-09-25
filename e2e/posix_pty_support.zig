@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const Repo = @import("git_repo.zig").Repo;
-const Screen = @import("screen.zig").Screen;
+const Repo = @import("git_repo").Repo;
+const Screen = @import("terminal_screen").Screen;
 const pager_path = @import("test_options").pager_path;
 
 const c = @cImport({

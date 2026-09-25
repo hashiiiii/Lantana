@@ -1,5 +1,5 @@
 const std = @import("std");
-const Repo = @import("git_repo.zig").Repo;
+const Repo = @import("git_repo").Repo;
 const pager_path = @import("test_options").pager_path;
 const pty = @import("posix_pty_support.zig");
 const Session = pty.Session;
@@ -155,6 +155,61 @@ test "mouse wheel scroll can move the selected file outside the visible tree" {
         // Only the tree column counts; patch text may still mention the first file.
         try std.testing.expect(std.mem.indexOf(u8, line[0..@min(28, line.len)], "00.cs") == null);
     }
+    try session.finish();
+    try expectUnchanged(&repo, status, config);
+}
+
+test "Git pager shows added deleted renamed binary mode and quoted path changes" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try Repo.init(arena, std.testing.io);
+    defer repo.deinit();
+    try repo.setPager(pager_path, false);
+    _ = try repo.git(&.{ "config", "core.quotePath", "true" });
+    _ = try repo.git(&.{ "config", "diff.renames", "true" });
+    try repo.write("Assets/Delete.prefab", "deleted\n");
+    try repo.write("Assets/Variant.prefab", "same content\n");
+    try repo.write("Assets/Launch.sh", "#!/bin/sh\n");
+    try repo.write("Images/Preview.png", "\x89PNG\x00before");
+    try repo.write("Notes/日本語 file.cs", "before\n");
+    try repo.commit();
+
+    // A single real Git patch checks that metadata-only and quoted sections reach the live viewer.
+    try repo.temp.dir.deleteFile(repo.io, "Assets/Delete.prefab");
+    try repo.temp.dir.rename("Assets/Variant.prefab", repo.temp.dir, "Assets/Alternate.prefab", repo.io);
+    _ = try repo.git(&.{ "add", "-N", "Assets/Alternate.prefab" });
+    {
+        var script = try repo.temp.dir.openFile(repo.io, "Assets/Launch.sh", .{ .mode = .read_write });
+        defer script.close(repo.io);
+        try script.setPermissions(repo.io, .executable_file);
+    }
+    try repo.write("Assets/New.meta", "guid: new\n");
+    _ = try repo.git(&.{ "add", "-N", "Assets/New.meta" });
+    try repo.write("Images/Preview.png", "\x89PNG\x00after");
+    try repo.write("Notes/日本語 file.cs", "after\n");
+    const status = try repo.git(&.{ "status", "--porcelain=v1" });
+    const config = try repo.read(".git/config");
+
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("rename from Assets/Variant.prefab", 0);
+    var mark = session.screen.frame;
+    try session.send("\x1b[B");
+    _ = try session.waitFrame("deleted", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[B");
+    _ = try session.waitFrame("old mode", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[B");
+    _ = try session.waitFrame("guid: new", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[B");
+    _ = try session.waitFrame("Binary files", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[B");
+    const quoted = try session.waitFrame("after", mark);
+    try std.testing.expect(std.mem.indexOf(u8, quoted, "file.cs") != null);
     try session.finish();
     try expectUnchanged(&repo, status, config);
 }

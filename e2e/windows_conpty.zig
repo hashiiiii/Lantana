@@ -1,5 +1,5 @@
 const std = @import("std");
-const Repo = @import("git_repo.zig").Repo;
+const Repo = @import("git_repo").Repo;
 const pager_path = @import("test_options").pager_path;
 const runConPty = @import("windows_conpty_support.zig").runConPty;
 

@@ -97,6 +97,19 @@ git -c "core.pager='$(pwd)/zig-out/bin/git-pager'" -c pager.diff=true --paginate
 
 The example's `--demo-document` option displays a sample document for `.prefab` files. It does not interpret their contents. In the viewer, use Up and Down to select files, `c` to collapse or reopen a folder, `m` to switch modes, `j` and `k` to scroll, `h` and `l` to pan, and `q` to quit. Raw tabs appear as arrows. Mouse selection and resize are supported.
 
-Run `mise exec -- zig build test` for unit tests and real Git terminal tests. The terminal tests use a PTY on macOS and Linux and ConPTY on Windows. Run `mise exec -- zig build fixtures` on macOS or Linux to regenerate the committed patches with Git. `mise exec -- zig build check -Dtarget=x86_64-windows-gnu` checks Windows compilation from another host.
+To try more changes in one review, create a separate local Git repository:
+
+```sh
+mise exec -- zig build demo
+pager="$(pwd)/zig-out/bin/git-pager"
+cd .zig-cache/lantana-demo
+GIT_PAGER="'$pager' --demo-document" git --paginate diff --cached
+```
+
+The demo has 33 changed files. They cover additions, deletions, a rename, a binary file, a mode change, and quoted paths. One file has two distant hunks. Another ends without a final newline. The file list is long enough to scroll. The changes are staged, so one Git command shows all of them. `zig build demo` leaves an existing `.zig-cache/lantana-demo` untouched.
+
+Run `mise exec -- zig build test` for unit tests and real Git terminal tests. Product unit tests live beside their code in `src/`. The screen helper keeps its unit test in `tools/terminal_screen.zig`. Terminal E2E tests and platform support live in `e2e/`. The Git helper and both generators live in `tools/`.
+
+The terminal tests use a PTY on macOS and Linux and ConPTY on Windows. Run `mise exec -- zig build fixtures` on macOS or Linux to regenerate the committed patches with Git. `mise exec -- zig build check -Dtarget=x86_64-windows-gnu` checks Windows compilation from another host.
 
 Lantana uses the Apache License 2.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency notices.
