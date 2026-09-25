@@ -1,4 +1,5 @@
 const std = @import("std");
+const zon = @import("build.zig.zon");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -9,20 +10,23 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .imports = &.{.{ .name = "vaxis", .module = vaxis_dep.module("vaxis") }},
     });
-    const example = b.addExecutable(.{
-        .name = "git-pager",
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", zon.version);
+    const cli = b.addExecutable(.{
+        .name = "lantana",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("examples/git-pager.zig"),
+            .root_source_file = b.path("src/cli.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "lantana", .module = lantana }},
+            .imports = &.{
+                .{ .name = "lantana", .module = lantana },
+                .{ .name = "build_options", .module = options.createModule() },
+            },
         }),
     });
-    const install_example = b.addInstallArtifact(example, .{});
-    const example_step = b.step("example", "Install the optional Git pager example");
-    example_step.dependOn(&install_example.step);
+    b.installArtifact(cli);
     const check_step = b.step("check", "Compile the pager without running terminal tests");
-    check_step.dependOn(&example.step);
+    check_step.dependOn(&cli.step);
     const tests = b.addTest(.{
         .name = "lantana-test",
         .root_module = b.createModule(.{
@@ -35,7 +39,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit and terminal integration tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
     const terminal_options = b.addOptions();
-    terminal_options.addOptionPath("pager_path", example.getEmittedBin());
+    terminal_options.addOptionPath("pager_path", cli.getEmittedBin());
     const terminal_tests = b.addTest(.{
         .name = "terminal-test",
         .root_module = b.createModule(.{
@@ -94,11 +98,11 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const demo_step = b.step("demo", "Create a local Git repository with varied changes");
-    demo_step.dependOn(&install_example.step);
+    demo_step.dependOn(b.getInstallStep());
     demo_step.dependOn(&b.addRunArtifact(demo_generator).step);
     const scroll_demo = b.addRunArtifact(demo_generator);
     scroll_demo.addArg("--scroll");
     const scroll_demo_step = b.step("demo-scroll", "Create a local Git repository with a tall and wide diff");
-    scroll_demo_step.dependOn(&install_example.step);
+    scroll_demo_step.dependOn(b.getInstallStep());
     scroll_demo_step.dependOn(&scroll_demo.step);
 }

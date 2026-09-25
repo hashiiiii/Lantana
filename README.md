@@ -1,136 +1,92 @@
 # Lantana
 
-Lantana is a Zig library for reviewing a captured Git patch in a terminal. It shows changed files in a collapsible tree and aligns text lines in two columns. Changed lines have tinted backgrounds. A caller may supply a document or complete file text for a selected file. Lantana does not run Git or change the repository.
+[![License](https://img.shields.io/github/license/hashiiiii/Lantana)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/hashiiiii/Lantana)](https://github.com/hashiiiii/Lantana/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/hashiiiii/Lantana/ci.yml?branch=main&label=CI)](https://github.com/hashiiiii/Lantana/actions/workflows/ci.yml)
 
-The package targets Zig 0.16.0. Release support is pending terminal checks on all target platforms and integration with its first consumer.
+Lantana shows Git patches in a terminal. It groups changed files in a tree and shows text changes side by side. Use the `lantana` command as a Git diff pager, or embed the Zig module in another program.
 
-## Add the package
+## Installation
 
-Pin a commit when adding the archive to a consumer's `build.zig.zon`. Replace `<commit>` with a Lantana commit and `<hash>` with the result of `zig fetch` for that URL:
-
-```sh
-zig fetch https://github.com/hashiiiii/Lantana/archive/<commit>.tar.gz
-```
-
-```zig
-.dependencies = .{
-    .lantana = .{
-        .url = "https://github.com/hashiiiii/Lantana/archive/<commit>.tar.gz",
-        .hash = "<hash>",
-    },
-},
-```
-
-Import its module in the consumer's `build.zig`:
-
-```zig
-const std = @import("std");
-
-pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-    const dependency = b.dependency("lantana", .{ .target = target, .optimize = optimize });
-    const application = b.addExecutable(.{
-        .name = "my-pager",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{.{ .name = "lantana", .module = dependency.module("lantana") }},
-        }),
-    });
-    b.installArtifact(application);
-}
-```
-
-Lantana exports a module. It installs no executable as a runtime dependency. The `git-pager` executable in this repository is an optional integration example.
-
-## Call the viewer
-
-Read the complete patch from standard input before calling `lantana.run`. Keep those bytes alive until the call returns. Pass the process I/O and environment from `std.process.Init`:
-
-```zig
-const std = @import("std");
-const lantana = @import("lantana");
-
-fn showPatch(init: std.process.Init, patch: []const u8) !void {
-    try lantana.run(std.heap.page_allocator, patch, .{
-        .io = init.io,
-        .environ = init.environ_map,
-        .theme = .{},
-    });
-}
-```
-
-An empty patch returns without entering the alternate screen. The caller handles errors from `run`. In particular, if terminal initialization fails, the caller can write its retained patch to standard output. The example does this for a detached pager. The example caps input at 32 MiB; the library does not set that limit.
-
-The Git pager receives the patch through standard input. Lantana opens terminal input separately, using `/dev/tty` on POSIX and console handles on Windows. The caller owns Git configuration, patch capture, and any source recovery.
-
-Set `Options.file_text` to a `FileTextProvider` when the viewer should reveal lines omitted from the patch. The callback receives `FileMetadata` and returns the full before and after text. Lantana checks that the supplied text matches every captured hunk before it folds unchanged ranges. If the text is missing or stale, the captured patch remains visible. The example pager reads Git blobs and checks a working tree file's object ID before using it.
-
-## Render a document
-
-Set `Options.renderer` to a `DocumentRenderer`. Lantana calls it when a file is selected. `FileMetadata` contains the exact patch section, old and new paths, and available blob IDs. The callback may return `.text` with ANSI SGR styles or `.unavailable` with a reason:
-
-```zig
-fn renderDocument(
-    context: ?*anyopaque,
-    allocator: std.mem.Allocator,
-    file: lantana.FileMetadata,
-) anyerror!lantana.Document {
-    _ = context;
-    const path = file.new_path orelse file.old_path orelse return .{ .unavailable = "No path" };
-    return .{ .text = try std.fmt.allocPrint(allocator, "Document: {s}\n", .{path}) };
-}
-
-const renderer: lantana.DocumentRenderer = .{ .render = renderDocument };
-```
-
-Allocate returned text for the supplied allocator, or return text that stays valid until `run` returns. Lantana strips unsupported control sequences before drawing. Raw diff is the initial view; press `m` to show a supplied document. A renderer error, unavailable result, or invalid document keeps the raw patch visible. Unsupported Git sections remain available as captured text.
-
-`Theme` accepts plain RGB `Color` values for foreground, background, accent, removed lines, and added lines. Its defaults work without configuration. The public renderer and theme interface contains no `libvaxis` types.
-
-## Try the example
+### Homebrew (macOS / Linux)
 
 ```sh
-mise exec -- zig build example
-git -c "core.pager='$(pwd)/zig-out/bin/git-pager'" -c pager.diff=true --paginate diff
+brew install hashiiiii/tap/lantana
 ```
 
-The example's `--demo-document` option makes a sample document available for `.prefab` files. Press `m` to view it. It does not interpret their contents. Choose a Nerd Font in your terminal to display the folder and extension icons. Icon selection uses a small built-in table and adds no dependency.
+### Scoop (Windows)
 
-In the left pane, Up and Down visit folders and files. Left closes a folder or selects its parent; Right opens a folder. Enter toggles a folder or focuses the right pane for a file.
+```powershell
+scoop bucket add hashiiiii https://github.com/hashiiiii/scoop-bucket
+scoop install lantana
+```
 
-The selected file's header shows added and removed line counts beneath its path. Drag the divider between the file tree and diff to resize both panes. In raw view, drag the divider between Before and After to change their widths.
+### mise
 
-In the right pane, Up, Down, `j`, `k`, Page Up, and Page Down scroll vertically. Left, Right, `h`, and `l` pan across long lines. Trackpad gestures also pan when the terminal reports horizontal mouse events. Vertical scrolling reveals a bar at the right edge. Horizontal panning reveals a bar along the bottom when lines extend past the pane. Both bars support clicks and dragging. Click a folded range to toggle it. Drag across source text and release to copy it through OSC 52, if your terminal permits clipboard access. Raw tabs appear as arrows.
+```sh
+mise use -g github:hashiiiii/Lantana
+```
 
-Esc in the right pane returns to the left pane. Esc in the left pane opens a quit dialog with Cancel selected. `q` quits directly. Resize is supported.
+### Manual
 
-To try more changes in one review, create a separate local Git repository:
+Download the ZIP archive for your platform from [GitHub Releases](https://github.com/hashiiiii/Lantana/releases). Extract the `lantana` executable (`lantana.exe` on Windows) and add its directory to your `PATH`.
+
+## Usage
+
+Pipe a Git patch into Lantana:
+
+```sh
+git diff | lantana
+git diff --cached | lantana
+```
+
+To open Lantana with a regular `git diff`, set up the diff pager:
+
+```sh
+lantana setup
+git diff
+lantana unset
+```
+
+Choose the same scope for `setup` and `unset`:
+
+| Scope | Shared file | Git configuration |
+| --- | --- | --- |
+| `--project` | `.lantana.gitconfig` | Current clone |
+| `--local` | None | Current clone |
+| `--user` | None | Global |
+
+Without a flag, both commands use `--local`. With `--project`, commit `.lantana.gitconfig` to share the choice; each clone runs `lantana setup --project` once to activate it. Lantana writes the fixed `pager.diff=lantana` value to that clone's Git configuration. The shared file is not loaded as Git configuration. `setup` leaves another configured diff pager untouched, and `unset` removes only Lantana's setting in the selected scope. `GIT_PAGER` and `git --paginate` can override `pager.diff`.
+
+In the file tree, use Up and Down to select a file, and Enter to focus its diff. Use Up, Down, `j`, and `k` to scroll. Press Esc to return to the tree, or `q` to quit. Lantana reads the patch and leaves the repository unchanged.
+
+## Development
+
+Install [mise](https://mise.jdx.dev/) and run these commands from the repository root:
+
+```sh
+mise install
+mise exec -- zig build
+mise exec -- zig build test
+mise exec -- zig build check
+```
+
+`mise exec -- zig build` installs `lantana` to `zig-out/bin/`. `mise exec -- zig build test` runs unit tests and terminal tests with real Git. The terminal tests use a PTY on macOS and Linux and ConPTY on Windows. Run `bash e2e/cli.sh` after building to check the Git setup commands. VS Code resolves Zig and ZLS from `PATH`; expose the mise tools to VS Code before opening the workspace.
+
+To try a repository with varied changes:
 
 ```sh
 mise exec -- zig build demo
-pager="$(pwd)/zig-out/bin/git-pager"
 cd .zig-cache/lantana-demo
-GIT_PAGER="'$pager' --demo-document" git --paginate diff --cached
+git diff --cached | ../../zig-out/bin/lantana
 ```
 
-The demo has 33 changed files. They cover additions, deletions, a rename, a binary file, a mode change, and quoted paths. One file has two distant hunks. Another ends without a final newline. The file list is long enough to scroll. The changes are staged, so one Git command shows all of them. `zig build demo` leaves an existing `.zig-cache/lantana-demo` untouched.
+The Zig module is in `src/`, terminal tests are in `e2e/`, Git fixtures and demo tools are in `tools/`, and release package templates are in `pkg/`.
 
-To try vertical and horizontal scrolling on one file, create a separate demo:
+## Contributing
 
-```sh
-mise exec -- zig build demo-scroll
-pager="$(pwd)/zig-out/bin/git-pager"
-cd .zig-cache/lantana-scroll-demo
-GIT_PAGER="'$pager'" git --paginate diff --cached
-```
+Open an issue before starting a pull request. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and required checks.
 
-`Long/WideAndTall.cs` has 180 changed lines, each 200 characters wide. `zig build demo-scroll` leaves an existing `.zig-cache/lantana-scroll-demo` untouched.
+## License
 
-Run `mise exec -- zig build test` for unit tests and real Git terminal tests. Product unit tests live beside their code in `src/`. The screen helper keeps its unit test in `tools/terminal_screen.zig`. Terminal E2E tests and platform support live in `e2e/`. The Git helper and both generators live in `tools/`.
-
-The terminal tests use a PTY on macOS and Linux and ConPTY on Windows. Run `mise exec -- zig build fixtures` on macOS or Linux to regenerate the committed patches with Git. `mise exec -- zig build check -Dtarget=x86_64-windows-gnu` checks Windows compilation from another host.
-
-Lantana uses the Apache License 2.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency notices.
+Lantana is licensed under the [Apache License 2.0](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency notices.

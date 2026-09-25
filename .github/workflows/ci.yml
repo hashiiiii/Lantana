@@ -21,7 +21,7 @@ jobs:
       - uses: jdx/mise-action@v4
       - name: Format
         shell: bash
-        run: mise exec -- zig fmt --check build.zig build.zig.zon src examples e2e tools
+        run: mise exec -- zig fmt --check build.zig build.zig.zon src e2e tools
       - name: Tests
         if: runner.os != 'Windows'
         shell: bash
@@ -41,15 +41,34 @@ jobs:
         run: |
           mise exec -- zig build fixtures
           git diff --exit-code -- src/fixtures
-      - name: Check default package does not install the example
+      - name: Check installed command and Git integration
         shell: bash
         run: |
           mise exec -- zig build
-          test ! -e zig-out/bin/git-pager
-          test ! -e zig-out/bin/git-pager.exe
+          bash e2e/cli.sh
       - name: Check patch whitespace
         shell: bash
         run: git diff --check HEAD^ HEAD
-      - name: Install optional example
+
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+      - name: Build release archives and check package metadata
         shell: bash
-        run: mise exec -- zig build example
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for entry in \
+            'aarch64-macos macos-arm64 lantana' \
+            'x86_64-macos macos-x64 lantana' \
+            'x86_64-linux-gnu linux-x64 lantana' \
+            'aarch64-linux-gnu linux-arm64 lantana' \
+            'x86_64-windows windows-x64 lantana.exe' \
+            'aarch64-windows windows-arm64 lantana.exe'; do
+            read -r target asset binary <<< "$entry"
+            zig build "-Dtarget=$target" -Doptimize=ReleaseSafe
+            zip -q -j "dist/lantana-$asset.zip" "zig-out/bin/$binary"
+          done
+          bash pkg/render_test.sh dist

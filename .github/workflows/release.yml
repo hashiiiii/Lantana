@@ -1,0 +1,170 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (X.Y.Z, no v prefix)'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+      - name: Validate input
+        run: |
+          set -euo pipefail
+          [ "$GITHUB_REF_NAME" = main ] || { echo "::error::run this workflow from main"; exit 1; }
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must be X.Y.Z"; exit 1; }
+      - name: Bump version
+        run: |
+          set -euo pipefail
+          bump-my-version bump --new-version "$VERSION"
+          git add -u
+          git diff --cached --name-only -z | tar --null -T - -czf "$RUNNER_TEMP/version-bump.tar.gz"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: version-bump
+          path: ${{ runner.temp }}/version-bump.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  binaries:
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-macos
+            asset: macos-arm64
+            binary: lantana
+          - target: x86_64-macos
+            asset: macos-x64
+            binary: lantana
+          - target: x86_64-linux-gnu
+            asset: linux-x64
+            binary: lantana
+          - target: aarch64-linux-gnu
+            asset: linux-arm64
+            binary: lantana
+          - target: x86_64-windows
+            asset: windows-x64
+            binary: lantana.exe
+          - target: aarch64-windows
+            asset: windows-arm64
+            binary: lantana.exe
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/apply-version-bump
+      - uses: jdx/mise-action@v4
+      - name: Build and archive
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe
+          zip -q -j "dist/lantana-${{ matrix.asset }}.zip" "zig-out/bin/${{ matrix.binary }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.asset }}
+          path: dist/lantana-${{ matrix.asset }}.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: binaries
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: ./.github/actions/apply-version-bump
+      - name: Stage version bump
+        run: git add -u
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: dist
+      - name: Validate release packages
+        run: bash pkg/render_test.sh dist
+      - name: Commit, tag, and push
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          user_id=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git diff --cached --quiet || git commit -m "chore: release v$VERSION"
+          git tag "v$VERSION"
+          git push --atomic origin main "v$VERSION"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          (cd dist && shasum -a 256 ./*.zip > SHA256SUMS)
+          gh release create "v$VERSION" dist/* --generate-notes
+
+  publish-packages:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: hashiiiii
+          repositories: Lantana,homebrew-tap,scoop-bucket
+      - uses: actions/checkout@v7
+      - name: Render package files from release assets
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh release download "v$VERSION" --dir dist
+          (cd dist && shasum -a 256 -c SHA256SUMS)
+          pkg/render.sh "$VERSION" dist out
+      - name: Push package files
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          user_id=$(gh api "/users/${APP_SLUG}[bot]" --jq .id)
+          mkdir -p repos
+          publish() {
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/hashiiiii/$1.git" "repos/$1"
+            mkdir -p "repos/$1/$(dirname "$3")"
+            cp "$2" "repos/$1/$3"
+            git -C "repos/$1" config user.name "${APP_SLUG}[bot]"
+            git -C "repos/$1" config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+            git -C "repos/$1" add "$3"
+            git -C "repos/$1" diff --cached --quiet || {
+              git -C "repos/$1" commit -m "chore: lantana v$VERSION"
+              git -C "repos/$1" push
+            }
+          }
+          publish homebrew-tap out/lantana.rb Formula/lantana.rb
+          publish scoop-bucket out/lantana.json bucket/lantana.json

@@ -49,6 +49,33 @@ test "Git pager reads its pipe and restores the real terminal" {
     try expectUnchanged(&repo, status_before, config_before);
 }
 
+test "setup makes plain git diff launch Lantana" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try Repo.init(arena, std.testing.io);
+    defer repo.deinit();
+    try repo.write("Example.cs", "before\n");
+    try repo.commit();
+    try repo.write("Example.cs", "after\n");
+    const executable = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, pager_path, arena);
+    const result = try std.process.run(arena, std.testing.io, .{
+        .argv = &.{ executable, "setup", "--local" },
+        .cwd = .{ .dir = repo.temp.dir },
+    });
+    try std.testing.expectEqual(@as(u8, 0), result.term.exited);
+    try std.testing.expectEqualStrings("lantana\n", try repo.git(&.{ "config", "--local", "--get", "pager.diff" }));
+    const config = try repo.read(".git/config");
+    var session = try Session.startPlainDiff(arena, std.testing.io, &repo);
+    defer session.abort();
+    try session.waitFor("before");
+    try session.finish();
+    try std.testing.expect(std.mem.indexOf(u8, session.transcript.items, "\x1b[?1049h") != null);
+    // Running the configured pager must leave the Git settings and working file intact.
+    try std.testing.expectEqualStrings(config, try repo.read(".git/config"));
+    try std.testing.expectEqualStrings("after\n", try repo.read("Example.cs"));
+}
+
 test "invalid UTF-8 remains visible and the terminal can be restored" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();

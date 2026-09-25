@@ -29,6 +29,14 @@ pub const Session = struct {
     finished: bool = false,
 
     pub fn start(arena: std.mem.Allocator, io: std.Io, repo: *Repo, wide_diff: bool) !Session {
+        return startWithPagination(arena, io, repo, wide_diff, true);
+    }
+
+    pub fn startPlainDiff(arena: std.mem.Allocator, io: std.Io, repo: *Repo) !Session {
+        return startWithPagination(arena, io, repo, false, false);
+    }
+
+    fn startWithPagination(arena: std.mem.Allocator, io: std.Io, repo: *Repo, wide_diff: bool, paginate: bool) !Session {
         var master: c_int = undefined;
         var slave: c_int = undefined;
         if (c.openpty(&master, &slave, null, null, null) != 0) return error.OpenPtyFailed;
@@ -37,6 +45,10 @@ pub const Session = struct {
         const size: c.struct_winsize = .{ .ws_row = 24, .ws_col = 80, .ws_xpixel = 0, .ws_ypixel = 0 };
         if (c.ioctl(slave, c.TIOCSWINSZ, &size) != 0) return error.ResizeFailed;
         const repo_path = try arena.dupeZ(u8, repo.path);
+        const pager_executable = try std.Io.Dir.cwd().realPathFileAlloc(io, pager_path, arena);
+        const pager_dir = std.fs.path.dirname(pager_executable) orelse return error.MissingPagerDirectory;
+        const inherited_path: []const u8 = if (c.getenv("PATH")) |path| std.mem.span(path) else "";
+        const pager_path_value = try arena.dupeZ(u8, try std.fmt.allocPrint(arena, "{s}:{s}", .{ pager_dir, inherited_path }));
         const screen = try Screen.init(arena, 80, 24);
         const child = c.fork();
         if (child < 0) return error.ForkFailed;
@@ -49,9 +61,12 @@ pub const Session = struct {
             _ = c.chdir(repo_path.ptr);
             _ = c.unsetenv("GIT_PAGER");
             _ = c.unsetenv("PAGER");
+            _ = c.setenv("PATH", pager_path_value.ptr, 1);
             _ = c.setenv("TERM", "xterm-256color", 1);
             const command = if (wide_diff)
                 "before=$(stty -g); git --paginate diff --unified=100; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\""
+            else if (!paginate)
+                "before=$(stty -g); git diff; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\""
             else
                 "before=$(stty -g); git --paginate diff; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\"";
             _ = c.execl("/bin/sh", "sh", "-c", command.ptr, @as(?*anyopaque, null));

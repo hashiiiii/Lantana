@@ -13,7 +13,6 @@
         "build.zig",
         "build.zig.zon",
         "src",
-        "examples",
         "e2e",
         "tools",
         "LICENSE",
