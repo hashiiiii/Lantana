@@ -16,6 +16,8 @@ const c = @cImport({
 });
 
 pub const Session = struct {
+    pub const Point = struct { col: usize, row: usize };
+
     arena: std.mem.Allocator,
     io: std.Io,
     master: c_int,
@@ -78,6 +80,13 @@ pub const Session = struct {
         }
     }
 
+    pub fn drag(self: *Session, from: Point, to: Point) !void {
+        const sequence = try std.fmt.allocPrint(self.arena, "\x1b[<0;{d};{d}M\x1b[<32;{d};{d}M\x1b[<0;{d};{d}m", .{
+            from.col, from.row, to.col, to.row, to.col, to.row,
+        });
+        try self.send(sequence);
+    }
+
     fn pump(self: *Session) !void {
         var fd = c.struct_pollfd{ .fd = self.master, .events = c.POLLIN, .revents = 0 };
         if (c.poll(&fd, 1, 100) <= 0) return;
@@ -126,6 +135,13 @@ pub const Session = struct {
         }
         std.log.err("missing {s}; terminal output: {s}", .{ expected, self.transcript.items });
         return error.MissingTerminalText;
+    }
+
+    pub fn waitClipboard(self: *Session, expected: []const u8) !void {
+        const encoded = try self.arena.alloc(u8, std.base64.standard.Encoder.calcSize(expected.len));
+        _ = std.base64.standard.Encoder.encode(encoded, expected);
+        const sequence = try std.fmt.allocPrint(self.arena, "\x1b]52;c;{s}\x1b\\", .{encoded});
+        try self.waitFor(sequence);
     }
 
     pub fn finish(self: *Session) !void {

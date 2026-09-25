@@ -226,6 +226,22 @@ test "the floating scrollbar can jump to the end of a long diff" {
     try session.finish();
 }
 
+test "dragging diff text copies source lines without line numbers" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Example.cs", "before α\tend\nsecond old\n", "after α\tend\nsecond new\n");
+    defer repo.deinit();
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("after α", 0);
+
+    // The selected source retains its tab and newline without the line-number gutter.
+    try session.drag(.{ .col = 60, .row = 2 }, .{ .col = 64, .row = 3 });
+    try session.waitClipboard("after α\tend\nsecon");
+    try session.finish();
+}
+
 test "mouse wheel scroll can move the selected file outside the visible tree" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
@@ -339,6 +355,9 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     var mark = session.screen.frame;
     try session.send("m");
     _ = try session.waitFrame("Document for Assets/A.prefab", mark);
+    // Document text must copy without its SGR styles or the surrounding pane.
+    try session.drag(.{ .col = 29, .row = 2 }, .{ .col = 36, .row = 2 });
+    try session.waitClipboard("Document");
     mark = session.screen.frame;
     try session.send("m");
     _ = try session.waitFrame("   1 value 0", mark);
@@ -356,7 +375,8 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     mark = session.screen.frame;
     try session.send("\x1b[B");
     const metadata = try session.waitFrame("Assets/B.meta", mark);
-    try std.testing.expect(std.mem.indexOf(u8, metadata, "No document for this file") != null);
+    // Missing optional documents must not add unrelated text beneath the raw diff.
+    try std.testing.expect(std.mem.indexOf(u8, metadata, "No document for this file") == null);
     mark = session.screen.frame;
     try session.send("c");
     const binary = try session.waitFrame("Image.png", mark);

@@ -51,21 +51,38 @@ fn hero(arena: std.mem.Allocator, changed: bool) ![]const u8 {
     return data.items;
 }
 
+fn scrollFile(arena: std.mem.Allocator, changed: bool) ![]const u8 {
+    var data: std.ArrayList(u8) = .empty;
+    const long_text = "abcdefghijklmnopqrstuvwxyz0123456789" ** 5;
+    for (0..180) |index| {
+        try data.appendSlice(arena, try std.fmt.allocPrint(arena, "line {d:0>3} {s} value={d:0>4}\n", .{
+            index,
+            long_text,
+            if (changed) index + 1000 else index,
+        }));
+    }
+    return data.items;
+}
+
 pub fn main(init: std.process.Init) !void {
     var memory = std.heap.ArenaAllocator.init(init.gpa);
     defer memory.deinit();
     const arena = memory.allocator();
     const io = init.io;
+    const args = try init.minimal.args.toSlice(arena);
+    const scroll = args.len == 2 and std.mem.eql(u8, args[1], "--scroll");
+    if (args.len > 2 or (args.len == 2 and !scroll)) return error.InvalidArguments;
+    const destination = if (scroll) "lantana-scroll-demo" else "lantana-demo";
 
     var cache = try std.Io.Dir.cwd().createDirPathOpen(io, ".zig-cache", .{});
     defer cache.close(io);
-    cache.createDir(io, "lantana-demo", .default_dir) catch |err| {
+    cache.createDir(io, destination, .default_dir) catch |err| {
         if (err == error.PathAlreadyExists)
-            std.log.err(".zig-cache/lantana-demo already exists; keep or remove it before creating a new demo", .{});
+            std.log.err(".zig-cache/{s} already exists; keep or remove it before creating a new demo", .{destination});
         return err;
     };
-    errdefer cache.deleteTree(io, "lantana-demo") catch {};
-    var dir = try cache.openDir(io, "lantana-demo", .{});
+    errdefer cache.deleteTree(io, destination) catch {};
+    var dir = try cache.openDir(io, destination, .{});
     defer dir.close(io);
     const repo: DemoRepo = .{ .arena = arena, .io = io, .dir = dir };
 
@@ -76,6 +93,16 @@ pub fn main(init: std.process.Init) !void {
     try repo.git(&.{ "config", "color.ui", "false" });
     try repo.git(&.{ "config", "core.quotePath", "true" });
     try repo.git(&.{ "config", "diff.renames", "true" });
+
+    if (scroll) {
+        try repo.write("Long/WideAndTall.cs", try scrollFile(arena, false));
+        try repo.git(&.{ "add", "-A" });
+        try repo.git(&.{ "commit", "-qm", "baseline" });
+        try repo.write("Long/WideAndTall.cs", try scrollFile(arena, true));
+        try repo.git(&.{ "add", "-A" });
+        std.log.info("scroll demo repository ready at .zig-cache/{s}", .{destination});
+        return;
+    }
 
     try repo.write("Assets/Characters/Hero.prefab", try hero(arena, false));
     try repo.write("Assets/Characters/Retired.prefab", "GameObject:\n  m_Name: Retired\n");

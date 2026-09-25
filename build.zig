@@ -96,4 +96,9 @@ pub fn build(b: *std.Build) void {
     const demo_step = b.step("demo", "Create a local Git repository with varied changes");
     demo_step.dependOn(&install_example.step);
     demo_step.dependOn(&b.addRunArtifact(demo_generator).step);
+    const scroll_demo = b.addRunArtifact(demo_generator);
+    scroll_demo.addArg("--scroll");
+    const scroll_demo_step = b.step("demo-scroll", "Create a local Git repository with a tall and wide diff");
+    scroll_demo_step.dependOn(&install_example.step);
+    scroll_demo_step.dependOn(&scroll_demo.step);
 }

@@ -86,7 +86,7 @@ fn renderDocument(
 const renderer: lantana.DocumentRenderer = .{ .render = renderDocument };
 ```
 
-Allocate returned text for the supplied allocator, or return text that stays valid until `run` returns. Lantana strips unsupported control sequences before drawing. Raw diff is the initial view; press `m` to show a supplied document. A renderer error, unavailable result, or invalid document keeps the raw patch visible with a reason. Unsupported Git sections remain available as captured text.
+Allocate returned text for the supplied allocator, or return text that stays valid until `run` returns. Lantana strips unsupported control sequences before drawing. Raw diff is the initial view; press `m` to show a supplied document. A renderer error, unavailable result, or invalid document keeps the raw patch visible. Unsupported Git sections remain available as captured text.
 
 `Theme` accepts plain RGB `Color` values for foreground, background, accent, removed lines, and added lines. Its defaults work without configuration. The public renderer and theme interface contains no `libvaxis` types.
 
@@ -97,9 +97,9 @@ mise exec -- zig build example
 git -c "core.pager='$(pwd)/zig-out/bin/git-pager'" -c pager.diff=true --paginate diff
 ```
 
-The example's `--demo-document` option makes a sample document available for `.prefab` files. Press `m` to view it. It does not interpret their contents. Choose a Nerd Font in your terminal to display the folder and file icons.
+The example's `--demo-document` option makes a sample document available for `.prefab` files. Press `m` to view it. It does not interpret their contents. Choose a Nerd Font in your terminal to display the folder and extension icons. Icon selection uses a small built-in table and adds no dependency.
 
-In the left pane, Up and Down visit folders and files. Left closes a folder or selects its parent; Right opens a folder. Enter toggles a folder or focuses the right pane for a file. In the right pane, Up, Down, `j`, `k`, Page Up, and Page Down scroll; Left, Right, `h`, and `l` pan. Click a folded range to reveal it, or scroll it to the top and press Enter. The scrollbar appears during scrolling and supports clicks and dragging. Esc in the right pane returns to the left pane. Esc in the left pane opens a quit dialog with Cancel selected. `q` quits directly. Mouse selection and resize are supported. Raw tabs appear as arrows.
+In the left pane, Up and Down visit folders and files. Left closes a folder or selects its parent; Right opens a folder. Enter toggles a folder or focuses the right pane for a file. In the right pane, Up, Down, `j`, `k`, Page Up, and Page Down scroll; Left, Right, `h`, and `l` pan. Click a folded range to toggle it. The scrollbar appears during scrolling and supports clicks and dragging. Drag across source text in the right pane and release to copy it through OSC 52, if your terminal permits clipboard access. Esc in the right pane returns to the left pane. Esc in the left pane opens a quit dialog with Cancel selected. `q` quits directly. Resize is supported. Raw tabs appear as arrows.
 
 To try more changes in one review, create a separate local Git repository:
 
@@ -111,6 +111,17 @@ GIT_PAGER="'$pager' --demo-document" git --paginate diff --cached
 ```
 
 The demo has 33 changed files. They cover additions, deletions, a rename, a binary file, a mode change, and quoted paths. One file has two distant hunks. Another ends without a final newline. The file list is long enough to scroll. The changes are staged, so one Git command shows all of them. `zig build demo` leaves an existing `.zig-cache/lantana-demo` untouched.
+
+To try vertical and horizontal scrolling on one file, create a separate demo:
+
+```sh
+mise exec -- zig build demo-scroll
+pager="$(pwd)/zig-out/bin/git-pager"
+cd .zig-cache/lantana-scroll-demo
+GIT_PAGER="'$pager'" git --paginate diff --cached
+```
+
+`Long/WideAndTall.cs` has 180 changed lines, each 200 characters wide. `zig build demo-scroll` leaves an existing `.zig-cache/lantana-scroll-demo` untouched.
 
 Run `mise exec -- zig build test` for unit tests and real Git terminal tests. Product unit tests live beside their code in `src/`. The screen helper keeps its unit test in `tools/terminal_screen.zig`. Terminal E2E tests and platform support live in `e2e/`. The Git helper and both generators live in `tools/`.
 

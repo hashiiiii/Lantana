@@ -2,9 +2,11 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 const document = @import("document.zig");
+const file_icon = @import("file_icon.zig");
 const review = @import("review.zig");
 const raw_split = @import("raw_split.zig");
 const terminal = @import("terminal.zig");
+const text_selection = @import("text_selection.zig");
 
 pub const Color = struct { r: u8, g: u8, b: u8 };
 
@@ -26,6 +28,20 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Envir
 
 const Focus = enum { tree, content };
 const DialogChoice = enum { cancel, quit };
+const SelectionSource = enum { before, after, fallback, document };
+const ContentSelection = struct {
+    source: SelectionSource,
+    origin: text_selection.Cell,
+    target: text_selection.Cell,
+    active: bool = false,
+    dragging: bool = true,
+};
+const SelectionArea = struct {
+    x: usize,
+    width: usize,
+    vertical: usize,
+    horizontal: usize,
+};
 
 const View = struct {
     state: *review.Review,
@@ -39,6 +55,7 @@ const View = struct {
     scrollbar_visible: bool = false,
     scrollbar_hide_ticks: u8 = 0,
     scrollbar_dragging: bool = false,
+    selection: ?ContentSelection = null,
     width: u16 = 80,
     height: u16 = 24,
 
@@ -63,8 +80,10 @@ const View = struct {
                     self.focus = if (self.focus == .tree) .content else .tree;
                 } else if (key.matches('m', .{})) {
                     self.state.toggleMode();
+                    self.selection = null;
                     self.focus = .content;
                 } else if (self.focus == .tree) {
+                    self.selection = null;
                     if (key.matches(vaxis.Key.down, .{}) or key.matches('j', .{})) {
                         try self.state.moveDown();
                         self.reveal_selection = true;
@@ -92,10 +111,6 @@ const View = struct {
                     self.state.panRight(1);
                 } else if (key.matches(vaxis.Key.left, .{}) or key.matches('h', .{})) {
                     self.state.panLeft(1);
-                } else if (key.matches(vaxis.Key.enter, .{})) {
-                    if (self.state.currentState()) |state| {
-                        if (state.mode == .raw) _ = try self.state.toggleFold(state.raw_scroll.vertical);
-                    }
                 } else return;
                 ctx.consumeAndRedraw();
             },
@@ -193,8 +208,21 @@ const View = struct {
     }
 
     fn handleMouse(self: *View, ctx: *vxfw.EventContext, value: vaxis.Mouse) !void {
+        // Drag events need temporary row data without retaining it for the viewer's lifetime.
+        var memory = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer memory.deinit();
+        const arena = memory.allocator();
+        if (value.button == .left and (value.type == .drag or value.type == .release)) {
+            if (self.selection) |*selection| {
+                if (selection.dragging) {
+                    try self.updateSelection(ctx, arena, value);
+                    ctx.consumeAndRedraw();
+                    return;
+                }
+            }
+        }
         if (value.button == .left and (value.type == .press or value.type == .drag or value.type == .release) and
-            (self.scrollbar_dragging or (value.col >= 0 and @as(usize, @intCast(value.col)) == self.width - 2 and self.scrollbar_visible)))
+            (self.scrollbar_dragging or (value.type == .press and value.col >= 0 and @as(usize, @intCast(value.col)) == self.width - 2 and self.scrollbar_visible)))
         {
             const row: usize = if (value.row < 1) 1 else @min(@as(usize, @intCast(value.row)), self.height - 2);
             try self.scrollFromScrollbar(ctx, row);
@@ -221,8 +249,9 @@ const View = struct {
             return;
         }
         if (value.type != .press or value.button != .left) return;
+        self.selection = null;
         if (x < tree_width and y >= 1 and y < self.height - 1) {
-            const visible = try self.state.visibleNodes(ctx.alloc);
+            const visible = try self.state.visibleNodes(arena);
             const index = self.tree_scroll + y - 1;
             if (index < visible.len) {
                 const node_index = visible[index];
@@ -237,11 +266,122 @@ const View = struct {
             self.focus = .content;
             if (y >= 1 and y < self.height - 1) {
                 if (self.state.currentState()) |state| {
-                    if (state.mode == .raw) _ = try self.state.toggleFold(state.raw_scroll.vertical + y - 1);
+                    if (state.mode == .raw and try self.state.toggleFold(state.raw_scroll.vertical + y - 1)) {
+                        ctx.consumeAndRedraw();
+                        return;
+                    }
+                }
+                if (try self.selectionSourceAt(arena, x)) |source| {
+                    if (try self.selectionHit(arena, source, x, y, false)) |point| {
+                        self.selection = .{ .source = source, .origin = point, .target = point };
+                    }
                 }
             }
         }
         ctx.consumeAndRedraw();
+    }
+
+    fn selectionSourceAt(self: *View, arena: std.mem.Allocator, x: usize) !?SelectionSource {
+        const state = self.state.currentState() orelse return null;
+        const source: SelectionSource = if (state.mode == .document and state.document != null)
+            .document
+        else blk: {
+            const rows = try self.state.visibleRows(arena);
+            if (rows.len == 0 or rows[0].kind == .fallback) break :blk .fallback;
+            const after = self.selectionArea(.after) orelse return null;
+            break :blk if (x >= after.x) .after else .before;
+        };
+        const area = self.selectionArea(source) orelse return null;
+        if (x < area.x or x >= area.x + area.width) return null;
+        return source;
+    }
+
+    fn selectionArea(self: *View, source: SelectionSource) ?SelectionArea {
+        if (self.width < 32 or self.height < 8) return null;
+        const state = self.state.currentState() orelse return null;
+        const right_start: usize = treeWidth(self.width) + 2;
+        const right_width: usize = self.width - right_start - 1;
+        const half = right_width / 2;
+        const raw = state.raw_scroll;
+        return switch (source) {
+            .document => .{ .x = right_start, .width = right_width, .vertical = state.document_scroll.vertical, .horizontal = state.document_scroll.horizontal },
+            .fallback => .{ .x = right_start, .width = right_width, .vertical = raw.vertical, .horizontal = raw.horizontal },
+            .before => .{ .x = right_start + 5, .width = half -| 5, .vertical = raw.vertical, .horizontal = raw.horizontal },
+            .after => .{ .x = right_start + half + 6, .width = right_width -| half -| 6, .vertical = raw.vertical, .horizontal = raw.horizontal },
+        };
+    }
+
+    fn selectionLines(self: *View, arena: std.mem.Allocator, source: SelectionSource) std.mem.Allocator.Error!?[]const ?[]const u8 {
+        const state = self.state.currentState() orelse return null;
+        if (source == .document) {
+            const data = state.document orelse return null;
+            if (state.mode != .document) return null;
+            const parsed = document.parse(arena, data) catch |err| switch (err) {
+                error.InvalidDocumentText => return null,
+                else => return error.OutOfMemory,
+            };
+            const lines = try arena.alloc(?[]const u8, parsed.lines.len);
+            for (parsed.lines, 0..) |line, index| {
+                var joined: std.ArrayList(u8) = .empty;
+                for (line.spans) |span| try joined.appendSlice(arena, span.text);
+                lines[index] = try joined.toOwnedSlice(arena);
+            }
+            return lines;
+        }
+        if (state.mode != .raw) return null;
+        const rows = self.state.visibleRows(arena) catch |err| switch (err) {
+            error.NoSelectedFile => return null,
+            else => return error.OutOfMemory,
+        };
+        const is_fallback = rows.len == 0 or rows[0].kind == .fallback;
+        if ((source == .fallback) != is_fallback) return null;
+        const lines = try arena.alloc(?[]const u8, rows.len);
+        for (rows, 0..) |row, index| {
+            const side = switch (source) {
+                .before, .fallback => row.before,
+                .after => row.after,
+                .document => unreachable,
+            };
+            lines[index] = if (side) |value| try safeDisplay(arena, value.text) else null;
+        }
+        return lines;
+    }
+
+    fn selectionHit(self: *View, arena: std.mem.Allocator, source: SelectionSource, x: usize, y: usize, clamp: bool) !?text_selection.Cell {
+        const area = self.selectionArea(source) orelse return null;
+        if (area.width == 0) return null;
+        const lines = (try self.selectionLines(arena, source)) orelse return null;
+        if (lines.len == 0) return null;
+        const screen_row = @max(@as(usize, 1), @min(y, self.height - 2));
+        const index = area.vertical + screen_row - 1;
+        if (index >= lines.len and !clamp) return null;
+        const row = @min(index, lines.len - 1);
+        const line = lines[row] orelse return null;
+        const column = area.horizontal + @min(x -| area.x, area.width - 1);
+        return text_selection.hit(line, row, column);
+    }
+
+    fn updateSelection(self: *View, ctx: *vxfw.EventContext, arena: std.mem.Allocator, mouse: vaxis.Mouse) !void {
+        const selection = if (self.selection) |*value| value else return;
+        const x: usize = if (mouse.col < 0) 0 else @intCast(mouse.col);
+        const y: usize = if (mouse.row < 0) 0 else @intCast(mouse.row);
+        if (try self.selectionHit(arena, selection.source, x, y, true)) |target| {
+            const lines = (try self.selectionLines(arena, selection.source)) orelse return;
+            const selected = text_selection.range(selection.origin, target);
+            if ((try text_selection.extract(arena, lines, selected)) != null) {
+                selection.target = target;
+                selection.active = selection.origin.row != target.row or selection.origin.start != target.start;
+            } else selection.active = false;
+        } else selection.active = false;
+        if (mouse.type == .release) {
+            selection.dragging = false;
+            if (selection.active) {
+                const lines = (try self.selectionLines(arena, selection.source)) orelse return;
+                if (try text_selection.extract(arena, lines, text_selection.range(selection.origin, selection.target))) |text_value| {
+                    try ctx.copyToClipboard(text_value);
+                }
+            }
+        }
     }
 
     fn draw(userdata: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
@@ -266,11 +406,14 @@ const View = struct {
         if (self.state.currentFile()) |file| {
             try putText(ctx.arena, surface, right_start, 0, right_width, 0, file.display_path, if (self.focus == .content) accent else foreground);
             try self.drawBody(ctx.arena, surface, right_start, right_width, foreground, accent);
-            if (self.state.currentState().?.unavailable_reason) |reason| try putText(ctx.arena, surface, right_start, size.height - 1, right_width, 0, reason, foreground);
+            try self.paintSelection(ctx.arena, surface);
         } else {
             try putText(ctx.arena, surface, right_start, 2, right_width, 0, "No changed files", foreground);
         }
-        if (self.dialog) try self.drawDialog(ctx.arena, surface);
+        if (self.dialog) {
+            for (surface.buffer) |*cell| cell.style.dim = true;
+            try self.drawDialog(ctx.arena, surface);
+        }
         if (!self.dialog) try self.paintScrollbar(ctx.arena, surface);
         return surface;
     }
@@ -334,6 +477,31 @@ const View = struct {
         }
     }
 
+    fn paintSelection(self: *View, arena: std.mem.Allocator, surface: vxfw.Surface) !void {
+        const selection = self.selection orelse return;
+        if (!selection.active) return;
+        const area = self.selectionArea(selection.source) orelse return;
+        const lines = (try self.selectionLines(arena, selection.source)) orelse return;
+        const selected = text_selection.range(selection.origin, selection.target);
+        for (1..self.height - 1) |screen_row| {
+            const row = area.vertical + screen_row - 1;
+            if (row < selected.start.row or row > selected.end.row or row >= lines.len) continue;
+            const line = lines[row] orelse continue;
+            const start = if (row == selected.start.row) selected.start.column else 0;
+            const end = if (row == selected.end.row) selected.end.column else text_selection.width(line);
+            const visible_start = @max(start, area.horizontal);
+            const visible_end = @min(end, area.horizontal + area.width);
+            for (visible_start..visible_end) |column| {
+                const x: u16 = @intCast(area.x + column - area.horizontal);
+                const y: u16 = @intCast(screen_row);
+                var cell = surface.readCell(x, y);
+                cell.style.reverse = true;
+                cell.default = false;
+                surface.writeCell(x, y, cell);
+            }
+        }
+    }
+
     fn drawTree(self: *View, arena: std.mem.Allocator, surface: vxfw.Surface, width: u16) !void {
         const visible = try self.state.visibleNodes(arena);
         const viewport: usize = self.height - 2;
@@ -368,7 +536,7 @@ const View = struct {
             const name = if (node.kind == .folder)
                 try std.fmt.allocPrint(arena, "{s}─ {s} {s}", .{ branch, if (node.expanded) "" else "󰉋", node.name })
             else
-                try std.fmt.allocPrint(arena, "{s}─ {s}  {s}", .{ branch, statusLetter(self.state.files[node.file_index.?].kind), node.name });
+                try std.fmt.allocPrint(arena, "{s}─ {s} {s} {s}", .{ branch, statusLetter(self.state.files[node.file_index.?].kind), file_icon.forName(node.name), node.name });
             try label.appendSlice(arena, name);
             try putText(arena, surface, 1, row, width, 0, label.items, style);
         }
@@ -415,7 +583,7 @@ const View = struct {
             if (row.kind == .fold) {
                 const style: vaxis.Style = .{ .fg = rgb(self.theme.accent), .bg = .{ .rgb = .{ 36, 35, 48 } } };
                 fill(surface, x, y, width, style);
-                const label = try std.fmt.allocPrint(arena, "{s} {d} unchanged lines (click or Enter)", .{ if (row.expanded) "▾" else "▸", row.hidden.len });
+                const label = try std.fmt.allocPrint(arena, "{s} {d} unchanged lines (click to toggle)", .{ if (row.expanded) "▾" else "▸", row.hidden.len });
                 try putText(arena, surface, x + 1, y, width -| 1, 0, label, style);
                 continue;
             }
@@ -447,17 +615,18 @@ const View = struct {
 const DialogGeometry = struct { left: u16, right: u16, top: u16, bottom: u16, buttons_row: u16, cancel: u16, confirm: u16 };
 
 fn dialogGeometry(width: u16, height: u16) DialogGeometry {
-    const box_width = @min(width -| 4, 38);
+    const box_width = @min(width -| 4, 32);
     const left = (width - box_width) / 2;
     const top = (height -| 7) / 2;
+    const cancel = left + (box_width - 17) / 2;
     return .{
         .left = left,
         .right = left + box_width - 1,
         .top = top,
         .bottom = top + 6,
         .buttons_row = top + 5,
-        .cancel = left + 3,
-        .confirm = left + box_width - 9,
+        .cancel = cancel,
+        .confirm = cancel + 11,
     };
 }
 

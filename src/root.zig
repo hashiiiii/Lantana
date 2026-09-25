@@ -1,5 +1,6 @@
 const std = @import("std");
 const tui = @import("tui.zig");
+const text_selection = @import("text_selection.zig");
 
 pub const git_patch = @import("git_patch.zig");
 pub const raw_split = @import("raw_split.zig");
@@ -39,4 +40,5 @@ test {
     _ = raw_split;
     _ = review;
     _ = document;
+    _ = text_selection;
 }
