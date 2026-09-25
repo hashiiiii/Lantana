@@ -1,6 +1,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const vaxis = @import("vaxis");
+const WinInput = if (builtin.os.tag == .windows) struct {
+    extern "kernel32" fn WriteConsoleInputW(
+        input: std.os.windows.HANDLE,
+        records: *const vaxis.tty.WindowsTty.INPUT_RECORD,
+        count: std.os.windows.DWORD,
+        written: *std.os.windows.DWORD,
+    ) callconv(.winapi) std.os.windows.BOOL;
+} else struct {};
 
 pub const Session = struct {
     app: vaxis.vxfw.App,
@@ -29,6 +37,19 @@ pub const Session = struct {
         self.app.deinit();
         self.console.restore();
     }
+
+    pub fn wakeInputOnQuit(self: *Session) !void {
+        if (builtin.os.tag == .windows) {
+            // Vaxis waits for its blocking console reader after a quit event.
+            // A focus record wakes it without leaving a character for the shell.
+            var record: vaxis.tty.WindowsTty.INPUT_RECORD = std.mem.zeroes(vaxis.tty.WindowsTty.INPUT_RECORD);
+            record.EventType = 0x0010;
+            record.Event.FocusEvent.bSetFocus = std.os.windows.BOOL.TRUE;
+            var written: std.os.windows.DWORD = 0;
+            if (WinInput.WriteConsoleInputW(self.console.input.?.handle, &record, 1, &written) == .FALSE or written != 1)
+                return error.ConsoleWakeFailed;
+        }
+    }
 };
 
 const ConsoleRedirect = struct {
@@ -41,9 +62,10 @@ const ConsoleRedirect = struct {
 
     fn init(io: std.Io) !ConsoleRedirect {
         if (builtin.os.tag != .windows) return .{};
-        const input = try std.Io.Dir.cwd().openFile(io, "CONIN$", .{ .mode = .read_write });
+        // Zig's Windows path conversion does not resolve bare console device names.
+        const input = try std.Io.Dir.cwd().openFile(io, "\\\\.\\CONIN$", .{ .mode = .read_write });
         errdefer input.close(io);
-        const output = try std.Io.Dir.cwd().openFile(io, "CONOUT$", .{ .mode = .read_write });
+        const output = try std.Io.Dir.cwd().openFile(io, "\\\\.\\CONOUT$", .{ .mode = .read_write });
         const parameters = std.os.windows.peb().ProcessParameters;
         const self: ConsoleRedirect = .{
             .active = true,

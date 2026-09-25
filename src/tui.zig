@@ -20,7 +20,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Envir
     var buffer: [4096]u8 = undefined;
     var session = try terminal.Session.init(io, allocator, environ, &buffer);
     defer session.deinit();
-    var view: View = .{ .state = state, .theme = theme };
+    var view: View = .{ .state = state, .theme = theme, .session = &session };
     try session.app.run(view.widget(), .{});
 }
 
@@ -29,6 +29,7 @@ const Focus = enum { tree, content };
 const View = struct {
     state: *review.Review,
     theme: Theme,
+    session: *terminal.Session,
     focus: Focus = .tree,
     tree_scroll: usize = 0,
     reveal_selection: bool = true,
@@ -46,6 +47,7 @@ const View = struct {
             .key_press => |key| {
                 if (key.matches('q', .{}) or key.matches(vaxis.Key.escape, .{})) {
                     ctx.quit = true;
+                    try self.session.wakeInputOnQuit();
                     return;
                 }
                 if (key.matches(vaxis.Key.down, .{})) {

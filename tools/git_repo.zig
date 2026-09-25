@@ -47,6 +47,8 @@ pub const Repo = struct {
         _ = try self.git(&.{ "config", "user.email", "test@example.invalid" });
         _ = try self.git(&.{ "config", "commit.gpgsign", "false" });
         _ = try self.git(&.{ "config", "color.ui", "false" });
+        // Host Git settings must not add line-ending warnings to captured patches.
+        _ = try self.git(&.{ "config", "core.autocrlf", "false" });
         return self;
     }
 

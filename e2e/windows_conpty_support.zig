@@ -145,19 +145,34 @@ pub fn runConPty(arena: std.mem.Allocator, io: std.Io, repo: *Repo) !Result {
     const command = try std.unicode.utf8ToUtf16LeAllocZ(arena, "git.exe --paginate diff");
     const directory = try std.unicode.utf8ToUtf16LeAllocZ(arena, repo.path);
     const environment = try childEnvironment(arena);
-    if (c.CreateProcessW(
-        null,
-        command.ptr,
-        null,
-        null,
-        0,
-        c.EXTENDED_STARTUPINFO_PRESENT | c.CREATE_UNICODE_ENVIRONMENT,
-        @ptrCast(@constCast(environment.slice.ptr)),
-        directory.ptr,
-        &startup.StartupInfo,
-        &process,
-    ) == 0) {
-        std.log.err("CreateProcessW failed: {d}", .{c.GetLastError()});
+    const launch = blk: {
+        const standard_kinds = [_]c.DWORD{ c.STD_INPUT_HANDLE, c.STD_OUTPUT_HANDLE, c.STD_ERROR_HANDLE };
+        var standard_handles: [standard_kinds.len]c.HANDLE = undefined;
+        for (standard_kinds, &standard_handles) |kind, *handle| handle.* = c.GetStdHandle(kind);
+        defer for (standard_kinds, standard_handles) |kind, handle| {
+            _ = c.SetStdHandle(kind, handle);
+        };
+        // A redirected test runner can pass its pipe handles to Git despite the attached ConPTY.
+        // Clearing them lets Windows fill Git's standard handles from its new console.
+        for (standard_kinds) |kind| {
+            if (c.SetStdHandle(kind, null) == 0) return error.ClearStandardHandleFailed;
+        }
+        const started = c.CreateProcessW(
+            null,
+            command.ptr,
+            null,
+            null,
+            0,
+            c.EXTENDED_STARTUPINFO_PRESENT | c.CREATE_UNICODE_ENVIRONMENT,
+            @ptrCast(@constCast(environment.slice.ptr)),
+            directory.ptr,
+            &startup.StartupInfo,
+            &process,
+        );
+        break :blk .{ .started = started != 0, .error_code = if (started == 0) c.GetLastError() else @as(c.DWORD, 0) };
+    };
+    if (!launch.started) {
+        std.log.err("CreateProcessW failed: {d}", .{launch.error_code});
         return error.ConPtyProcessFailed;
     }
     defer _ = c.CloseHandle(process.hProcess);

@@ -62,9 +62,15 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .linux) terminal_tests.root_module.linkSystemLibrary("util", .{});
     check_step.dependOn(&terminal_tests.step);
     test_step.dependOn(&b.addRunArtifact(terminal_tests).step);
-    const screen_tests = b.addTest(.{ .name = "terminal-screen-test", .root_module = terminal_screen });
-    check_step.dependOn(&screen_tests.step);
-    test_step.dependOn(&b.addRunArtifact(screen_tests).step);
+    const test_binaries_step = b.step("test-bins", "Install test executables for direct Windows runs");
+    test_binaries_step.dependOn(&b.addInstallArtifact(tests, .{}).step);
+    test_binaries_step.dependOn(&b.addInstallArtifact(terminal_tests, .{}).step);
+    if (target.result.os.tag != .windows) {
+        // The screen emulator backs POSIX PTY assertions; Windows uses ConPTY output directly.
+        const screen_tests = b.addTest(.{ .name = "terminal-screen-test", .root_module = terminal_screen });
+        check_step.dependOn(&screen_tests.step);
+        test_step.dependOn(&b.addRunArtifact(screen_tests).step);
+    }
 
     if (target.result.os.tag != .windows) {
         const fixture_generator = b.addExecutable(.{

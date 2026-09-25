@@ -23,8 +23,18 @@ jobs:
         shell: bash
         run: mise exec -- zig fmt --check build.zig build.zig.zon src examples e2e tools
       - name: Tests
+        if: runner.os != 'Windows'
         shell: bash
+        timeout-minutes: 10
         run: mise exec -- zig build test --summary all
+      - name: Tests (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        timeout-minutes: 10
+        run: |
+          mise exec -- zig build test-bins -j1 --summary all
+          ./zig-out/bin/lantana-test.exe
+          ./zig-out/bin/terminal-test.exe
       - name: Check Git fixtures
         if: runner.os == 'macOS'
         shell: bash
