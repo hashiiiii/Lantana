@@ -30,7 +30,8 @@ const Focus = enum { tree, content };
 const DialogChoice = enum { cancel, quit };
 const ScrollbarAxis = enum { vertical, horizontal };
 const Divider = enum { outer, inner };
-const body_top: u16 = 2;
+const stats_row: u16 = 2;
+const body_top: u16 = stats_row + 2;
 const min_tree_content: u16 = 10;
 const min_diff_content: u16 = 14;
 // A raw side needs five cells for its line-number gutter and one for source text.
@@ -492,6 +493,8 @@ const View = struct {
             try putText(ctx.arena, surface, 1, @min(size.height -| 1, 2), size.width -| 2, 0, "Terminal too small", .{ .fg = rgb(self.theme.accent) });
             return surface;
         }
+        // Resizing a pane or selecting another file can shrink the valid horizontal range.
+        try self.clampHorizontalScroll(ctx.arena);
         const geometry = self.layout();
         const foreground: vaxis.Style = .{ .fg = rgb(self.theme.foreground) };
         const accent: vaxis.Style = .{ .fg = rgb(self.theme.accent), .bold = true };
@@ -510,9 +513,9 @@ const View = struct {
             try putText(ctx.arena, surface, geometry.right_start, 0, geometry.right_width, 0, file.display_path, if (self.focus == .content) accent else foreground);
             const added = try std.fmt.allocPrint(ctx.arena, "+{d}", .{file.added_lines});
             const removed = try std.fmt.allocPrint(ctx.arena, "-{d}", .{file.removed_lines});
-            try putText(ctx.arena, surface, geometry.right_start, 1, geometry.right_width, 0, added, .{ .fg = rgb(self.theme.added), .bold = true });
+            try putText(ctx.arena, surface, geometry.right_start, stats_row, geometry.right_width, 0, added, .{ .fg = rgb(self.theme.added), .bold = true });
             const stats_offset: u16 = @intCast(@min(added.len + 1, geometry.right_width));
-            try putText(ctx.arena, surface, geometry.right_start + stats_offset, 1, geometry.right_width - stats_offset, 0, removed, .{ .fg = rgb(self.theme.removed), .bold = true });
+            try putText(ctx.arena, surface, geometry.right_start + stats_offset, stats_row, geometry.right_width - stats_offset, 0, removed, .{ .fg = rgb(self.theme.removed), .bold = true });
             try self.drawBody(ctx.arena, surface, geometry, foreground, accent);
             try self.paintSelection(ctx.arena, surface);
         } else {
@@ -575,6 +578,13 @@ const View = struct {
 
     const HorizontalMetrics = struct { viewport: usize, max_offset: usize };
 
+    fn clampHorizontalScroll(self: *View, arena: std.mem.Allocator) std.mem.Allocator.Error!void {
+        const state = self.state.currentState() orelse return;
+        const scroll = if (state.mode == .document) &state.document_scroll else &state.raw_scroll;
+        if (scroll.horizontal == 0) return;
+        scroll.horizontal = @min(scroll.horizontal, (try self.horizontalMetrics(arena)).max_offset);
+    }
+
     fn horizontalMetrics(self: *View, arena: std.mem.Allocator) std.mem.Allocator.Error!HorizontalMetrics {
         if (self.width < 32) return .{ .viewport = 0, .max_offset = 0 };
         const state = self.state.currentState() orelse return .{ .viewport = 0, .max_offset = 0 };
@@ -598,22 +608,35 @@ const View = struct {
             else => return error.OutOfMemory,
         };
         const fallback = rows.len == 0 or rows[0].kind == .fallback;
-        const viewport = if (fallback) right_width else @min(geometry.before_width -| 5, geometry.after_width -| 5);
-        var longest: usize = 0;
-        for (rows) |row| {
-            if (fallback) {
+        if (fallback) {
+            var longest: usize = 0;
+            for (rows) |row| {
                 if (row.before) |side| longest = @max(longest, text_selection.width(try safeDisplay(arena, side.text)));
-                continue;
             }
-            for ([_]?raw_split.Side{ row.before, row.after }) |item| {
-                if (item) |side| {
-                    var width = text_selection.width(try safeDisplay(arena, side.text));
-                    if (side.no_newline) width += "[no newline]".len + @intFromBool(side.text.len != 0);
-                    longest = @max(longest, width);
-                }
+            return .{ .viewport = right_width, .max_offset = longest -| right_width };
+        }
+        const before_viewport: usize = geometry.before_width -| 5;
+        const after_viewport: usize = geometry.after_width -| 5;
+        var before_longest: usize = 0;
+        var after_longest: usize = 0;
+        for (rows) |row| {
+            if (row.before) |side| {
+                var width = text_selection.width(try safeDisplay(arena, side.text));
+                if (side.no_newline) width += "[no newline]".len + @intFromBool(side.text.len != 0);
+                before_longest = @max(before_longest, width);
+            }
+            if (row.after) |side| {
+                var width = text_selection.width(try safeDisplay(arena, side.text));
+                if (side.no_newline) width += "[no newline]".len + @intFromBool(side.text.len != 0);
+                after_longest = @max(after_longest, width);
             }
         }
-        return .{ .viewport = viewport, .max_offset = longest -| viewport };
+        const before_offset = before_longest -| before_viewport;
+        const after_offset = after_longest -| after_viewport;
+        return if (before_offset >= after_offset)
+            .{ .viewport = before_viewport, .max_offset = before_offset }
+        else
+            .{ .viewport = after_viewport, .max_offset = after_offset };
     }
 
     fn scrollFromHorizontalScrollbar(self: *View, ctx: *vxfw.EventContext, column: usize) !void {

@@ -102,7 +102,7 @@ test "tab indentation remains distinct from spaces after horizontal panning" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
-    var repo = try changedRepo(arena, "A.cs", "\tbefore()\n", "\tafter()\n");
+    var repo = try changedRepo(arena, "A.cs", "\tbefore() with enough text to pan\n", "\tafter() with enough text to pan\n");
     defer repo.deinit();
     const status = try repo.git(&.{ "status", "--porcelain=v1" });
     const config = try repo.read(".git/config");
@@ -166,7 +166,7 @@ test "folder focus and pane keys keep the quit dialog cancellable" {
     _ = try session.waitFrame(" Assets", mark);
     mark = session.screen.frame;
     try session.send("\x1b[B\r\x1b[6~");
-    _ = try session.waitFrame("new line 29", mark);
+    _ = try session.waitFrame("new line 28", mark);
     mark = session.screen.frame;
     try session.send("\x1b");
     _ = try session.waitFrame("A.cs", mark);
@@ -198,8 +198,10 @@ test "file change counts and draggable pane dividers stay aligned" {
     const initial = try session.waitFrame("after-one", 0);
     var lines = std.mem.splitScalar(u8, initial, '\n');
     try std.testing.expect(std.mem.indexOf(u8, lines.next().?, "Example.cs") != null);
-    // File counts stay in the header even when the diff content changes position.
+    // Empty rows separate the counts from both the path border and source lines.
+    try std.testing.expect(std.mem.indexOf(u8, lines.next().?, "+1 -1") == null);
     try std.testing.expect(std.mem.indexOf(u8, lines.next().?, "+1 -1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, lines.next().?, "+1 -1") == null);
     const original_before = try cellColumn(initial, "before-one");
     const original_after = try cellColumn(initial, "after-one");
 
@@ -220,7 +222,7 @@ test "file change counts and draggable pane dividers stay aligned" {
     const final_after = try cellColumn(wider_before, "after-one");
     try std.testing.expect(final_after > moved_after);
     // Selection must follow the moved source column rather than the old split position.
-    try session.drag(.{ .col = final_after + 1, .row = 3 }, .{ .col = final_after + 5, .row = 3 });
+    try session.drag(.{ .col = final_after + 1, .row = 5 }, .{ .col = final_after + 5, .row = 5 });
     try session.waitClipboard("after");
     // Extreme drags and a narrow terminal must leave the header and both panes usable.
     mark = session.screen.frame;
@@ -230,6 +232,38 @@ test "file change counts and draggable pane dividers stay aligned" {
     try session.resize(32, 8);
     const narrow = try session.waitFrame("+1 -1", mark);
     try std.testing.expect(std.mem.indexOf(u8, narrow, "Example.cs") != null);
+    try session.finish();
+}
+
+test "horizontal panning stops when the longest source reaches its pane edge" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    const padding = [_]u8{'x'} ** 40;
+    const before = try std.fmt.allocPrint(arena, "before-{s}-END\n", .{padding});
+    var repo = try changedRepo(arena, "WideBefore.cs", before, "after\n");
+    defer repo.deinit();
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("before-", 0);
+
+    // Unequal pane widths require each side's visible width when finding the end position.
+    var mark = session.screen.frame;
+    try session.drag(.{ .col = 54, .row = 10 }, .{ .col = 65, .row = 10 });
+    _ = try session.waitFrame("before-", mark);
+    mark = session.screen.frame;
+    try session.send("\r\x1b[<67;70;10M");
+    _ = try session.waitFrame("━", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[<0;79;23M\x1b[<0;79;23m");
+    const end = try session.waitFrame("-END", mark);
+    try std.testing.expectEqual(@as(usize, 64), (try cellColumn(end, "END")) + 3);
+
+    // Repeated Right input must not reveal blank space beyond the last source column.
+    mark = session.screen.frame;
+    try session.send("l");
+    const at_limit = try session.waitFrame("-END", mark);
+    try std.testing.expectEqual(@as(usize, 64), (try cellColumn(at_limit, "END")) + 3);
     try session.finish();
 }
 
@@ -325,7 +359,7 @@ test "dragging diff text copies source lines without line numbers" {
     _ = try session.waitFrame("after α", 0);
 
     // The selected source retains its tab and newline without the line-number gutter.
-    try session.drag(.{ .col = 60, .row = 3 }, .{ .col = 64, .row = 4 });
+    try session.drag(.{ .col = 60, .row = 5 }, .{ .col = 64, .row = 6 });
     try session.waitClipboard("after α\tend\nsecon");
     try session.finish();
 }
@@ -427,7 +461,7 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     try repo.write("Image.png", "\x89PNG\x00before");
     try repo.commit();
     many_lines.clearRetainingCapacity();
-    for (0..30) |index| try many_lines.appendSlice(arena, try std.fmt.allocPrint(arena, "value {d} after\n", .{index}));
+    for (0..30) |index| try many_lines.appendSlice(arena, try std.fmt.allocPrint(arena, "value {d} after with enough text to pan\n", .{index}));
     try repo.write("Assets/A.prefab", many_lines.items);
     try repo.write("Assets/B.meta", "guid: after\n");
     try repo.write("Scripts/C.cs", "class C { int value = 2; }\n");
@@ -444,17 +478,17 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     try session.send("m");
     _ = try session.waitFrame("Document for Assets/A.prefab", mark);
     // Document text must copy without its SGR styles or the surrounding pane.
-    try session.drag(.{ .col = 29, .row = 3 }, .{ .col = 36, .row = 3 });
+    try session.drag(.{ .col = 29, .row = 5 }, .{ .col = 36, .row = 5 });
     try session.waitClipboard("Document");
     mark = session.screen.frame;
     try session.send("m");
     _ = try session.waitFrame("   1│value 0", mark);
     mark = session.screen.frame;
     try session.send("jj");
-    const before_pan = try session.waitFrame("value 22 after", mark);
+    const before_pan = try session.waitFrame("value 20 after", mark);
     mark = session.screen.frame;
     try session.send("ll");
-    const after_pan = try session.waitFrame("lue 22 after", mark);
+    const after_pan = try session.waitFrame("lue 20 after", mark);
     // A changed offset label alone would not prove that the source columns moved.
     try std.testing.expect(!std.mem.eql(u8, bodyRows(before_pan), bodyRows(after_pan)));
     mark = session.screen.frame;
