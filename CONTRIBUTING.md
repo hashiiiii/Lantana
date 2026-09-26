@@ -16,7 +16,7 @@ Install the tools with `mise install`. Run `mise exec -- zig fmt --check build.z
 
 ## Releases
 
-GitHub Releases contain the native `lantana` executables and generated release notes. Maintainers publish releases through the Release workflow.
+GitHub Releases contain the native `lantana` executables and generated release notes. Maintainers run the Release workflow from `main` with an `X.Y.Z` version. Configure `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repository secrets. The GitHub App needs Contents write access to Lantana, homebrew-tap, and scoop-bucket.
 
 ## License
 

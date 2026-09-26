@@ -7,6 +7,10 @@ const GitContext = @import("git_context.zig").GitContext;
 const max_patch_bytes = 32 * 1024 * 1024;
 
 pub fn main(init: std.process.Init) !u8 {
+    return run(init, null);
+}
+
+pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
     var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
@@ -62,8 +66,7 @@ pub fn main(init: std.process.Init) !u8 {
         }
         return 0;
     }
-    const demo_document = args.len == 2 and std.mem.eql(u8, args[1], "--demo-document");
-    if (args.len > 2 or (args.len == 2 and !demo_document)) {
+    if (args.len != 1) {
         std.log.err("unknown arguments; run lantana --help", .{});
         return 2;
     }
@@ -84,7 +87,7 @@ pub fn main(init: std.process.Init) !u8 {
     lantana.run(arena, bytes.items, .{
         .io = init.io,
         .environ = init.environ_map,
-        .renderer = if (demo_document) .{ .render = renderDemoDocument } else null,
+        .renderer = renderer,
         .file_text = .{ .context = &git_context, .load = GitContext.load },
     }) catch |err| {
         var output_buffer: [4096]u8 = undefined;
@@ -102,14 +105,4 @@ fn writeOutput(io: std.Io, message: []const u8) !void {
     var output: std.Io.File.Writer = .init(.stdout(), io, &buffer);
     try output.interface.writeAll(message);
     try output.interface.flush();
-}
-
-fn renderDemoDocument(_: ?*anyopaque, arena: std.mem.Allocator, file: lantana.FileMetadata) anyerror!lantana.Document {
-    const path = file.new_path orelse file.old_path orelse return .{ .unavailable = "No path" };
-    if (!std.mem.endsWith(u8, path, ".prefab")) return .{ .unavailable = "No document for this file" };
-    return .{ .text = try std.fmt.allocPrint(
-        arena,
-        "\x1b[1;36mDocument for {s}\x1b[0m\nOld blob: {s}\nNew blob: {s}\n\n{s}",
-        .{ path, file.old_blob orelse "unknown", file.new_blob orelse "unknown", file.patch },
-    ) };
 }

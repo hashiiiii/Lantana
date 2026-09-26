@@ -12,17 +12,18 @@ pub fn build(b: *std.Build) void {
     });
     const options = b.addOptions();
     options.addOption([]const u8, "version", zon.version);
+    const cli_module = b.createModule(.{
+        .root_source_file = b.path("src/cli.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "lantana", .module = lantana },
+            .{ .name = "build_options", .module = options.createModule() },
+        },
+    });
     const cli = b.addExecutable(.{
         .name = "lantana",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/cli.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "lantana", .module = lantana },
-                .{ .name = "build_options", .module = options.createModule() },
-            },
-        }),
+        .root_module = cli_module,
     });
     b.installArtifact(cli);
     const check_step = b.step("check", "Compile the pager without running terminal tests");
@@ -40,6 +41,21 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(tests).step);
     const terminal_options = b.addOptions();
     terminal_options.addOptionPath("pager_path", cli.getEmittedBin());
+    if (target.result.os.tag != .windows) {
+        const document_pager = b.addExecutable(.{
+            .name = "lantana-document-test",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("e2e/document_pager.zig"),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "cli", .module = cli_module },
+                    .{ .name = "lantana", .module = lantana },
+                },
+            }),
+        });
+        terminal_options.addOptionPath("document_pager_path", document_pager.getEmittedBin());
+    }
     const terminal_tests = b.addTest(.{
         .name = "terminal-test",
         .root_module = b.createModule(.{

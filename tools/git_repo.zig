@@ -87,7 +87,7 @@ pub const Repo = struct {
         _ = try self.git(&.{ "commit", "-qm", "initial" });
     }
 
-    pub fn setPager(self: *Repo, pager_path: []const u8, demo: bool) !void {
+    pub fn setPager(self: *Repo, pager_path: []const u8) !void {
         const absolute_path = try std.Io.Dir.cwd().realPathFileAlloc(self.io, pager_path, self.arena);
         var command: std.ArrayList(u8) = .empty;
         try command.append(self.arena, '\'');
@@ -97,7 +97,6 @@ pub const Repo = struct {
             else => try command.append(self.arena, byte),
         };
         try command.append(self.arena, '\'');
-        if (demo) try command.appendSlice(self.arena, " --demo-document");
         _ = try self.git(&.{ "config", "core.pager", command.items });
         _ = try self.git(&.{ "config", "pager.diff", "true" });
     }

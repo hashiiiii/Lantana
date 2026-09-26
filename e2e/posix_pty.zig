@@ -1,6 +1,7 @@
 const std = @import("std");
 const Repo = @import("git_repo").Repo;
 const pager_path = @import("test_options").pager_path;
+const document_pager_path = @import("test_options").document_pager_path;
 const pty = @import("posix_pty_support.zig");
 const Session = pty.Session;
 const runDetached = pty.runDetached;
@@ -9,7 +10,7 @@ const bodyRows = pty.bodyRows;
 fn changedRepo(arena: std.mem.Allocator, name: []const u8, before: []const u8, after: []const u8) !Repo {
     var repo = try Repo.init(arena, std.testing.io);
     errdefer repo.deinit();
-    try repo.setPager(pager_path, false);
+    try repo.setPager(pager_path);
     try repo.write(name, before);
     try repo.commit();
     try repo.write(name, after);
@@ -396,7 +397,7 @@ test "mouse wheel scroll can move the selected file outside the visible tree" {
     const arena = memory.allocator();
     var repo = try Repo.init(arena, std.testing.io);
     defer repo.deinit();
-    try repo.setPager(pager_path, false);
+    try repo.setPager(pager_path);
     for (0..30) |index| try repo.write(try std.fmt.allocPrint(arena, "{d:0>2}.cs", .{index}), "before\n");
     try repo.commit();
     for (0..30) |index| try repo.write(try std.fmt.allocPrint(arena, "{d:0>2}.cs", .{index}), "after\n");
@@ -423,7 +424,7 @@ test "Git pager shows added deleted renamed binary mode and quoted path changes"
     const arena = memory.allocator();
     var repo = try Repo.init(arena, std.testing.io);
     defer repo.deinit();
-    try repo.setPager(pager_path, false);
+    try repo.setPager(pager_path);
     _ = try repo.git(&.{ "config", "core.quotePath", "true" });
     _ = try repo.git(&.{ "config", "diff.renames", "true" });
     try repo.write("Assets/Delete.prefab", "deleted\n");
@@ -478,7 +479,7 @@ test "Git viewer navigates document raw tree mouse and resize without changing t
     const arena = memory.allocator();
     var repo = try Repo.init(arena, std.testing.io);
     defer repo.deinit();
-    try repo.setPager(pager_path, true);
+    try repo.setPager(document_pager_path);
     var many_lines: std.ArrayList(u8) = .empty;
     for (0..30) |index| try many_lines.appendSlice(arena, try std.fmt.allocPrint(arena, "value {d}\n", .{index}));
     try repo.write("Assets/A.prefab", many_lines.items);

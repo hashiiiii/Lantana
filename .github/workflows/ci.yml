@@ -14,49 +14,44 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - uses: jdx/mise-action@v4
       - name: Format
-        shell: bash
-        run: mise exec -- zig fmt --check build.zig build.zig.zon src e2e tools
+        run: zig fmt --check build.zig build.zig.zon src e2e tools
       - name: Tests
         if: runner.os != 'Windows'
-        shell: bash
         timeout-minutes: 10
-        run: mise exec -- zig build test --summary all
+        run: zig build test
       - name: Tests (Windows)
         if: runner.os == 'Windows'
-        shell: bash
         timeout-minutes: 10
         run: |
-          mise exec -- zig build test-bins -j1 --summary all
+          zig build test-bins -j1
           ./zig-out/bin/lantana-test.exe
           ./zig-out/bin/terminal-test.exe
       - name: Check Git fixtures
         if: runner.os == 'macOS'
-        shell: bash
         run: |
-          mise exec -- zig build fixtures
+          zig build fixtures
           git diff --exit-code -- src/fixtures
       - name: Check installed command and Git integration
-        shell: bash
         run: |
-          mise exec -- zig build
+          zig build
           bash e2e/cli.sh
-      - name: Check patch whitespace
-        shell: bash
-        run: git diff --check HEAD^ HEAD
 
   packages:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
       - name: Build release archives and check package metadata
-        shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist

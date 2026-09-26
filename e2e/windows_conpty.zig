@@ -12,7 +12,7 @@ test "Git pager opens and closes a native ConPTY without changing the repository
     try repo.write("Example.cs", "before\n");
     try repo.commit();
     try repo.write("Example.cs", "after\n");
-    try repo.setPager(pager_path, false);
+    try repo.setPager(pager_path);
     const status_before = try repo.git(&.{ "status", "--porcelain=v1" });
     const config_before = try repo.read(".git/config");
     const result = try runConPty(arena, std.testing.io, &repo);
