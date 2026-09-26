@@ -1,6 +1,11 @@
 const std = @import("std");
 const package = @import("package.zig");
 
+comptime {
+    // Package tests must remain discoverable when the root tests are filtered out.
+    _ = package;
+}
+
 test "Homebrew formula pairs each platform URL with its archive checksum" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();

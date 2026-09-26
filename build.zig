@@ -173,8 +173,6 @@ pub fn build(b: *std.Build) void {
     } else "dist";
     package_run.addArg(b.pathFromRoot(package_dist));
     package_run.addArg(b.getInstallPath(.{ .custom = "packages" }, ""));
-    package_run.addArg(b.pathFromRoot("pkg/lantana.json"));
-    package_run.addFileInput(b.path("pkg/lantana.json"));
     package_run.stdio = .inherit;
     packages_step.dependOn(&package_run.step);
 
@@ -221,9 +219,7 @@ pub fn build(b: *std.Build) void {
     release_package_run.addArg(zon.version);
     release_package_run.addArg(release_dist);
     release_package_run.addArg(release_packages);
-    release_package_run.addArg(b.pathFromRoot("pkg/lantana.json"));
     release_package_run.addArg(release_dist);
-    release_package_run.addFileInput(b.path("pkg/lantana.json"));
     release_package_run.stdio = .inherit;
     release_step.dependOn(&release_package_run.step);
 }
