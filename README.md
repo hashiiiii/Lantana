@@ -16,7 +16,7 @@ brew install hashiiiii/tap/lantana
 
 ### Scoop (Windows)
 
-```powershell
+```sh
 scoop bucket add hashiiiii https://github.com/hashiiiii/scoop-bucket
 scoop install lantana
 ```
