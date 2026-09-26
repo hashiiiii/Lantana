@@ -21,17 +21,17 @@ pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
     }
     if (args.len == 2 and std.mem.eql(u8, args[1], "--help")) {
         try writeOutput(init.io,
-            \\Usage: lantana [--version | --help | setup [--project | --local | --user] | unset [--project | --local | --user]]
+            \\Usage: lantana [--version | --help | set [--project | --local | --user] | unset [--project | --local | --user]]
             \\       git diff | lantana
             \\
             \\Read a Git patch from standard input and show it in the terminal.
-            \\setup configures Git's diff pager; unset removes that setting.
+            \\set configures Git's diff pager; unset removes that setting.
             \\
         );
         return 0;
     }
-    if (args.len >= 2 and (std.mem.eql(u8, args[1], "setup") or std.mem.eql(u8, args[1], "unset"))) {
-        const action: git_config.Action = if (std.mem.eql(u8, args[1], "setup")) .setup else .unset;
+    if (args.len >= 2 and (std.mem.eql(u8, args[1], "set") or std.mem.eql(u8, args[1], "unset"))) {
+        const action: git_config.Action = if (std.mem.eql(u8, args[1], "set")) .set else .unset;
         const scope: git_config.Scope = if (args.len == 2 or (args.len == 3 and std.mem.eql(u8, args[2], "--local")))
             .local
         else if (args.len == 3 and std.mem.eql(u8, args[2], "--project"))
@@ -39,7 +39,7 @@ pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
         else if (args.len == 3 and std.mem.eql(u8, args[2], "--user"))
             .user
         else {
-            std.log.err("expected setup or unset with --project, --local, or --user", .{});
+            std.log.err("expected set or unset with --project, --local, or --user", .{});
             return 2;
         };
         const result = git_config.apply(arena, init.io, action, scope) catch |err| {
@@ -54,11 +54,11 @@ pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
         };
         if (result == .changed) {
             const message = if (scope == .project)
-                (if (action == .setup)
+                (if (action == .set)
                     "Set pager.diff to lantana for this clone. Commit .lantana.gitconfig to share the choice.\n"
                 else
                     "Removed the project setting and this clone's Lantana diff pager.\n")
-            else if (action == .setup)
+            else if (action == .set)
                 try std.fmt.allocPrint(arena, "Set pager.diff to lantana in {s} Git configuration.\n", .{@tagName(scope)})
             else
                 try std.fmt.allocPrint(arena, "Removed pager.diff from {s} Git configuration.\n", .{@tagName(scope)});

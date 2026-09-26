@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Action = enum { setup, unset };
+pub const Action = enum { set, unset };
 pub const Scope = enum { project, local, user };
 pub const Result = enum { changed, unchanged };
 
@@ -16,7 +16,7 @@ pub fn apply(arena: std.mem.Allocator, io: std.Io, action: Action, scope: Scope)
     };
     const direct = try single(try query(arena, io, &.{ "git", "config", scope_arg, "--no-includes", "--null", "--get-all", "pager.diff" }));
     switch (action) {
-        .setup => {
+        .set => {
             if (direct) |value| {
                 if (std.mem.eql(u8, value, "lantana")) return .unchanged;
                 return error.ExistingPager;
@@ -49,7 +49,7 @@ fn applyProject(arena: std.mem.Allocator, io: std.Io, action: Action) !Result {
     const local_pager = try single(try query(arena, io, &.{ "git", "config", "--local", "--no-includes", "--null", "--get-all", "pager.diff" }));
 
     switch (action) {
-        .setup => {
+        .set => {
             if (project_pager) |value| {
                 if (!std.mem.eql(u8, value, "lantana")) return error.ExistingPager;
             }

@@ -33,53 +33,68 @@ Download the ZIP archive for your platform from [GitHub Releases](https://github
 
 ## Usage
 
-Pipe a Git patch into Lantana:
+View changes that have not been staged with `git add`:
 
 ```sh
 git diff | lantana
+```
+
+View staged changes that will go into the next commit:
+
+```sh
 git diff --cached | lantana
 ```
 
-To open Lantana with a regular `git diff`, set up the diff pager:
+### Git integration
+
+To open Lantana with a regular `git diff`, set the diff pager:
 
 ```sh
-lantana setup
+lantana set
 git diff
 lantana unset
 ```
 
-Choose the same scope for `setup` and `unset`:
+Choose a scope:
 
-| Scope | Shared file | Git configuration |
-| --- | --- | --- |
-| `--project` | `.lantana.gitconfig` | Current clone |
-| `--local` | None | Current clone |
-| `--user` | None | Global |
+| Command | Git configuration |
+| --- | --- |
+| `lantana set --project` | Current clone, with the choice recorded in `.lantana.gitconfig` |
+| `lantana set --local` | Current clone |
+| `lantana set --user` | Global |
 
-Without a flag, both commands use `--local`. With `--project`, commit `.lantana.gitconfig` to share the choice; each clone runs `lantana setup --project` once to activate it. Lantana writes the fixed `pager.diff=lantana` value to that clone's Git configuration. The shared file is not loaded as Git configuration. `setup` leaves another configured diff pager untouched, and `unset` removes only Lantana's setting in the selected scope. `GIT_PAGER` and `git --paginate` can override `pager.diff`.
+Without a flag, `set` and `unset` use `--local`. Use the same scope when removing the integration, for example `lantana unset --user`.
+
+With `--project`, commit `.lantana.gitconfig` to share the pager choice. Run `lantana set --project` once in each clone to activate it.
+
+Git selects pagers through [`pager.diff`](https://git-scm.com/docs/git-config). [`.gitattributes`](https://git-scm.com/docs/gitattributes) selects diff and merge drivers for individual files. Using a pager lets Lantana show all changed files together.
+
+`set` leaves another configured diff pager untouched. `unset` removes only Lantana's setting in the selected scope. `GIT_PAGER` and `git --paginate` can override `pager.diff`.
 
 In the file tree, use Up and Down to select a file, and Enter to focus its diff. Use Up, Down, `j`, and `k` to scroll. Press Esc to return to the tree, or `q` to quit. Lantana reads the patch and leaves the repository unchanged.
 
 ## Development
 
-Install [mise](https://mise.jdx.dev/) and run these commands from the repository root:
+Install [mise](https://mise.jdx.dev/) and [activate it in your shell](https://mise.jdx.dev/cli/activate.html). Run these commands from the repository root:
 
 ```sh
 mise install
-mise exec -- zig build
-mise exec -- zig build test
-mise exec -- zig build check
+zig build
+zig build test
+zig build check
 ```
 
-`mise exec -- zig build` installs `lantana` to `zig-out/bin/`. `mise exec -- zig build test` runs unit tests and terminal tests with real Git. The terminal tests use a PTY on macOS and Linux and ConPTY on Windows. Run `bash e2e/cli.sh` after building to check the Git setup commands. VS Code resolves Zig and ZLS from `PATH`; expose the mise tools to VS Code before opening the workspace.
+`zig build` installs `lantana` to `zig-out/bin/`. `zig build test` runs unit tests and terminal tests with real Git. The terminal tests use a PTY on macOS and Linux and ConPTY on Windows. Run `bash e2e/cli.sh` after building to check `set` and `unset`. VS Code resolves Zig and ZLS from `PATH`; expose the mise tools to VS Code before opening the workspace.
 
 To try a repository with varied changes:
 
 ```sh
-mise exec -- zig build demo
+zig build demo
 cd .zig-cache/lantana-demo
 git diff --cached | ../../zig-out/bin/lantana
 ```
+
+The demo stages its changes with `git add`, so `--cached` shows those changes against its last commit. A plain `git diff` is empty immediately after generation.
 
 The Zig module is in `src/`, terminal tests are in `e2e/`, Git fixtures and demo tools are in `tools/`, and release package templates are in `pkg/`.
 

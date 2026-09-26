@@ -18,20 +18,20 @@ version=$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' "$repo_root/build.zig.zon"
 
 git init -q "$scratch/local"
 cd "$scratch/local"
-"$binary" setup
-[ "$(git config --local --get pager.diff)" = lantana ] || fail "default local setup"
-"$binary" setup --local
-[ "$(git config --local --get-all pager.diff)" = lantana ] || fail "repeated setup"
+"$binary" set
+[ "$(git config --local --get pager.diff)" = lantana ] || fail "default local set"
+"$binary" set --local
+[ "$(git config --local --get-all pager.diff)" = lantana ] || fail "repeated set"
 "$binary" unset
 if git config --local --get pager.diff >/dev/null; then fail "local unset"; fi
 git config --local pager.diff less
-if "$binary" setup --local >/dev/null 2>&1; then fail "replaced another pager"; fi
+if "$binary" set --local >/dev/null 2>&1; then fail "replaced another pager"; fi
 if "$binary" unset --local >/dev/null 2>&1; then fail "removed another pager"; fi
 [ "$(git config --local --get pager.diff)" = less ] || fail "changed another pager"
 
 cd "$scratch"
-"$binary" setup --user
-[ "$(git config --global --get pager.diff)" = lantana ] || fail "user setup"
+"$binary" set --user
+[ "$(git config --global --get pager.diff)" = lantana ] || fail "user set"
 "$binary" unset --user
 if git config --global --get pager.diff >/dev/null; then fail "user unset"; fi
 
@@ -39,7 +39,7 @@ git init -q "$scratch/project"
 mkdir "$scratch/project/nested"
 cd "$scratch/project/nested"
 # The shareable preference belongs at the repository root even from a subdirectory.
-"$binary" setup --project
+"$binary" set --project
 cd ..
 [ "$(git config --local --get pager.diff)" = lantana ] || fail "project clone config"
 [ "$(git config --file .lantana.gitconfig --get pager.diff)" = lantana ] || fail "project preference"
@@ -48,8 +48,8 @@ git -c user.name=Lantana -c user.email=lantana@example.com commit -qm "Record pr
 git clone -q "$scratch/project" "$scratch/clone"
 cd "$scratch/clone"
 if git config --local --get pager.diff >/dev/null; then fail "clone inherited local config"; fi
-"$binary" setup --project
-[ "$(git config --local --get pager.diff)" = lantana ] || fail "clone setup"
+"$binary" set --project
+[ "$(git config --local --get pager.diff)" = lantana ] || fail "clone set"
 "$binary" unset --project
 if git config --local --get pager.diff >/dev/null; then fail "clone unset"; fi
 [ ! -e .lantana.gitconfig ] || fail "clone project file remains"

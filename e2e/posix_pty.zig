@@ -50,7 +50,7 @@ test "Git pager reads its pipe and restores the real terminal" {
     try expectUnchanged(&repo, status_before, config_before);
 }
 
-test "setup makes plain git diff launch Lantana" {
+test "set makes plain git diff launch Lantana" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
@@ -61,7 +61,7 @@ test "setup makes plain git diff launch Lantana" {
     try repo.write("Example.cs", "after\n");
     const executable = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, pager_path, arena);
     const result = try std.process.run(arena, std.testing.io, .{
-        .argv = &.{ executable, "setup", "--local" },
+        .argv = &.{ executable, "set", "--local" },
         .cwd = .{ .dir = repo.temp.dir },
     });
     try std.testing.expectEqual(@as(u8, 0), result.term.exited);

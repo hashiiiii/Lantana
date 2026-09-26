@@ -12,7 +12,15 @@ Use English for issues, pull requests, documentation, comments, and commit messa
 
 ## Development checks
 
-Install the tools with `mise install`. Run `mise exec -- zig fmt --check build.zig build.zig.zon src e2e tools`, `mise exec -- zig build test`, and `mise exec -- zig build check` before opening a pull request. Git pager behavior is covered by terminal tests that use real Git and a PTY or ConPTY.
+Follow the [development setup](README.md#development). Run these commands before opening a pull request:
+
+```sh
+zig fmt --check build.zig build.zig.zon src e2e tools
+zig build test
+zig build check
+```
+
+Git pager behavior is covered by terminal tests that use real Git and a PTY or ConPTY.
 
 ## Releases
 
