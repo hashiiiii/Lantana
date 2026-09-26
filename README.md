@@ -132,8 +132,7 @@ git diff HEAD | ../../zig-out/bin/lantana
 | --- | --- |
 | `src/` | Zig library and CLI |
 | `e2e/` | Terminal and CLI tests |
-| `tools/` | Git fixture and demo generators |
-| `pkg/` | Scoop package template |
+| `tools/` | Git fixture, demo, and release package generators |
 
 ## Contributing
 

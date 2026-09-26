@@ -26,7 +26,9 @@ Git pager behavior is covered by terminal tests that use real Git and a PTY or C
 
 GitHub Releases contain the native `lantana` executables and generated release notes. Maintainers run the Release workflow from `main` with an `X.Y.Z` version. Configure `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repository secrets. The GitHub App needs Contents write access to Lantana, homebrew-tap, and scoop-bucket.
 
-The package tool generates the Homebrew formula from the release version, supported targets, and ZIP checksums. Lantana does not store a Ruby template.
+The package tool generates the Homebrew formula and Scoop manifest from the release version and ZIP checksums. Lantana does not store package templates.
+Run `zig build release` to build all six archives and generate `lantana.rb`, `lantana.json`, and `SHA256SUMS`.
+Run `zig build packages -- dist` to regenerate package files from downloaded release archives. Existing checksums are verified before generation.
 The Release workflow publishes the generated formula to `hashiiiii/homebrew-tap` and the Scoop manifest to `hashiiiii/scoop-bucket`.
 
 ## License
