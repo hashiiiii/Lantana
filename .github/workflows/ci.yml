@@ -33,37 +33,17 @@ jobs:
           zig build test-bins -j1
           ./zig-out/bin/lantana-test.exe
           ./zig-out/bin/terminal-test.exe
+          ./zig-out/bin/package-test.exe
       - name: Check Git fixtures
         if: runner.os == 'macOS'
         run: |
           zig build fixtures
           git diff --exit-code -- src/fixtures
-      - name: Check installed command and Git integration
-        run: |
-          zig build
-          bash e2e/cli.sh
 
   packages:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
       - name: Build release archives and check package metadata
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          for entry in \
-            'aarch64-macos macos-arm64 lantana' \
-            'x86_64-macos macos-x64 lantana' \
-            'x86_64-linux-gnu linux-x64 lantana' \
-            'aarch64-linux-gnu linux-arm64 lantana' \
-            'x86_64-windows windows-x64 lantana.exe' \
-            'aarch64-windows windows-arm64 lantana.exe'; do
-            read -r target asset binary <<< "$entry"
-            zig build "-Dtarget=$target" -Doptimize=ReleaseSafe
-            zip -q -j "dist/lantana-$asset.zip" "zig-out/bin/$binary"
-          done
-          bash pkg/render_test.sh dist
+        run: zig build release -j2

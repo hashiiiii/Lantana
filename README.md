@@ -77,10 +77,17 @@ mise install
 zig build
 zig build test
 zig build check
-bash e2e/cli.sh
 ```
 
 `zig build` installs `lantana` to `zig-out/bin/`.
+
+Build the release archives and package files:
+
+```sh
+zig build release
+```
+
+Archives are written to `zig-out/release/`. Homebrew and Scoop files are written to `zig-out/packages/`.
 
 Create and open the demo:
 

@@ -15,6 +15,7 @@
         "src",
         "e2e",
         "tools",
+        "pkg",
         "LICENSE",
         "README.md",
         "THIRD_PARTY_NOTICES.md",
