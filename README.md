@@ -68,6 +68,37 @@ With `--project`, commit `.lantana.gitconfig`. Run `lantana set --project` once 
 
 Use Up/Down to select files and Enter to focus the diff. Scroll with Up/Down or `j`/`k`. Press Esc to return to the tree or `q` to quit.
 
+### Keymap
+
+Create `keymap.toml` in your configuration directory:
+
+| Environment | Path |
+| --- | --- |
+| `XDG_CONFIG_HOME` is set | `$XDG_CONFIG_HOME/lantana/keymap.toml` |
+| Windows | `%APPDATA%/lantana/keymap.toml` |
+| macOS / Linux | `$HOME/.config/lantana/keymap.toml` |
+
+```toml
+[global]
+quit = ["Ctrl+q"]
+
+[content]
+page_down = ["Ctrl+d"]
+page_up = ["Ctrl+u"]
+```
+
+Arrays replace an action's keys. Unspecified actions retain their defaults. `[]` disables an action.
+
+| Context | Actions |
+| --- | --- |
+| `global` | `quit`, `back`, `focus_next`, `toggle_render_mode` |
+| `tree` | `move_up`, `move_down`, `collapse_or_focus_parent`, `expand_folder`, `activate`, `toggle_folder` |
+| `content` | `scroll_up`, `scroll_down`, `page_up`, `page_down`, `pan_left`, `pan_right` |
+| `dialog` | `cancel`, `confirm`, `choose_cancel`, `choose_quit`, `activate_choice` |
+
+Use one character or a named key with modifiers, such as `Down`, `Enter`, `Escape`, `Ctrl+q`, or `Shift+Enter`.
+See [zig-keymap](https://github.com/hashiiiii/zig-keymap#keys) for supported keys.
+
 ## Development
 
 Install [mise](https://mise.jdx.dev/) and [activate it in your shell](https://mise.jdx.dev/cli/activate.html). Run these commands from the repository root:

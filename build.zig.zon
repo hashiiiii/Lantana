@@ -4,6 +4,10 @@
     .fingerprint = 0x58536d070848c8f0,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
+        .zig_keymap = .{
+            .url = "https://github.com/hashiiiii/zig-keymap/archive/c99c480f36847b1cd46a9f9c3c43a51f60696fc1.tar.gz",
+            .hash = "zig_keymap-0.1.0-s0XxwrWcAACyag_HzFGqkibsKPo-OjYeTB7Gyj5-uM-y",
+        },
         .vaxis = .{
             .url = "https://github.com/rockorager/libvaxis/archive/c060d314930c5552b99a89278a6a695baf0352da.tar.gz",
             .hash = "vaxis-0.6.0-BWNV_LC4CwBka_bJk8SOXqzCM-nyQH00jzdL0kUhGwRE",

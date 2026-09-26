@@ -31,6 +31,55 @@ fn cellColumn(frame: []const u8, needle: []const u8) !usize {
     return error.MissingFrameText;
 }
 
+test "custom quit retains default navigation and cannot escape the quit dialog" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try Repo.init(arena, std.testing.io);
+    defer repo.deinit();
+    try repo.setPager(pager_path);
+    try repo.write("A.cs", "before-first\n");
+    try repo.write("B.cs", "before-second\n");
+    try repo.commit();
+    try repo.write("A.cs", "after-first\n");
+    try repo.write("B.cs", "after-second\n");
+    try repo.write(".git/xdg/lantana/keymap.toml", "[global]\nquit=[\"x\"]\n");
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    try session.waitFor("before-first");
+    // The old q must be unbound; omitted navigation and modal commands remain active.
+    var frame = session.screen.frame;
+    try session.send("qj");
+    _ = try session.waitFrame("before-second", frame);
+    frame = session.screen.frame;
+    try session.send("\x1b");
+    _ = try session.waitFrame("[Cancel]", frame);
+    frame = session.screen.frame;
+    try session.send("x\x1b[C");
+    _ = try session.waitFrame("[Quit]", frame);
+    frame = session.screen.frame;
+    try session.send("nk");
+    _ = try session.waitFrame("before-first", frame);
+    try session.finishAfterInput("x");
+}
+
+test "embedded viewer uses injected bindings without reading the CLI config" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Example.cs", "before\n", "after\n");
+    defer repo.deinit();
+    try repo.setPager(document_pager_path);
+    const command = std.mem.trim(u8, try repo.git(&.{ "config", "--get", "core.pager" }), "\r\n");
+    _ = try repo.git(&.{ "config", "core.pager", try std.fmt.allocPrint(arena, "{s} --embedded-keymap", .{command}) });
+    // Embedders must receive their own bindings even when the CLI's user file is invalid.
+    try repo.write(".git/xdg/lantana/keymap.toml", "invalid TOML");
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    try session.waitFor("before");
+    try session.finishAfterInput("x");
+}
+
 test "Git pager reads its pipe and restores the real terminal" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();

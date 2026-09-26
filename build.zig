@@ -6,10 +6,14 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const vaxis_dep = b.dependency("vaxis", .{ .target = target, .optimize = optimize });
+    const keymap = b.dependency("zig_keymap", .{ .target = target, .optimize = optimize }).module("keymap");
     const lantana = b.addModule("lantana", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
-        .imports = &.{.{ .name = "vaxis", .module = vaxis_dep.module("vaxis") }},
+        .imports = &.{
+            .{ .name = "vaxis", .module = vaxis_dep.module("vaxis") },
+            .{ .name = "keymap", .module = keymap },
+        },
     });
     const options = b.addOptions();
     options.addOption([]const u8, "version", zon.version);
@@ -35,7 +39,10 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/root.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "vaxis", .module = vaxis_dep.module("vaxis") }},
+            .imports = &.{
+                .{ .name = "vaxis", .module = vaxis_dep.module("vaxis") },
+                .{ .name = "keymap", .module = keymap },
+            },
         }),
     });
     const test_step = b.step("test", "Run unit and terminal integration tests");
@@ -181,11 +188,15 @@ pub fn build(b: *std.Build) void {
         const target_query = std.Build.parseTargetQuery(.{ .arch_os_abi = release_target.query }) catch unreachable;
         const release_target_resolved = b.resolveTargetQuery(target_query);
         const release_vaxis = b.dependency("vaxis", .{ .target = release_target_resolved, .optimize = .ReleaseSafe });
+        const release_keymap = b.dependency("zig_keymap", .{ .target = release_target_resolved, .optimize = .ReleaseSafe }).module("keymap");
         const release_lantana = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
             .target = release_target_resolved,
             .optimize = .ReleaseSafe,
-            .imports = &.{.{ .name = "vaxis", .module = release_vaxis.module("vaxis") }},
+            .imports = &.{
+                .{ .name = "vaxis", .module = release_vaxis.module("vaxis") },
+                .{ .name = "keymap", .module = release_keymap },
+            },
         });
         const release_cli_module = b.createModule(.{
             .root_source_file = b.path("src/cli.zig"),

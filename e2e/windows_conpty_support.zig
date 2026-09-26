@@ -55,7 +55,7 @@ fn environmentLessThan(_: void, left: EnvironmentEntry, right: EnvironmentEntry)
     ) == c.CSTR_LESS_THAN;
 }
 
-fn childEnvironment(arena: std.mem.Allocator) !std.process.Environ.WindowsBlock {
+fn childEnvironment(arena: std.mem.Allocator, repo: *Repo) !std.process.Environ.WindowsBlock {
     const current: std.process.Environ = .{ .block = std.process.Environ.GlobalBlock.global };
     var map = try current.createMap(arena);
     defer map.deinit();
@@ -63,6 +63,8 @@ fn childEnvironment(arena: std.mem.Allocator) !std.process.Environ.WindowsBlock 
     _ = map.orderedRemove("GIT_PAGER");
     _ = map.orderedRemove("PAGER");
     try map.put("TERM", "xterm-256color");
+    // Default-key tests and custom-key tests share an isolated configuration directory.
+    try map.put("XDG_CONFIG_HOME", try std.fs.path.join(arena, &.{ repo.path, ".git", "xdg" }));
     const entries = try arena.alloc(EnvironmentEntry, map.count());
     for (map.keys(), map.values(), entries) |key, value, *entry| {
         entry.* = .{ .key = key, .value = value, .wide_key = try std.unicode.wtf8ToWtf16LeAlloc(arena, key) };
@@ -97,7 +99,7 @@ fn closePseudoConsole(pseudoconsole: c.HPCON, output_read: *c.HANDLE, output_wri
     reader.join();
 }
 
-pub fn runConPty(arena: std.mem.Allocator, io: std.Io, repo: *Repo) !Result {
+pub fn runConPty(arena: std.mem.Allocator, io: std.Io, repo: *Repo, quit_input: []const u8) !Result {
     var input_read: c.HANDLE = null;
     var input_write: c.HANDLE = null;
     var output_read: c.HANDLE = null;
@@ -144,7 +146,7 @@ pub fn runConPty(arena: std.mem.Allocator, io: std.Io, repo: *Repo) !Result {
     var process: c.PROCESS_INFORMATION = std.mem.zeroes(c.PROCESS_INFORMATION);
     const command = try std.unicode.utf8ToUtf16LeAllocZ(arena, "git.exe --paginate diff");
     const directory = try std.unicode.utf8ToUtf16LeAllocZ(arena, repo.path);
-    const environment = try childEnvironment(arena);
+    const environment = try childEnvironment(arena, repo);
     const launch = blk: {
         const standard_kinds = [_]c.DWORD{ c.STD_INPUT_HANDLE, c.STD_OUTPUT_HANDLE, c.STD_ERROR_HANDLE };
         var standard_handles: [standard_kinds.len]c.HANDLE = undefined;
@@ -216,7 +218,7 @@ pub fn runConPty(arena: std.mem.Allocator, io: std.Io, repo: *Repo) !Result {
                     std.mem.indexOf(u8, visible, "   1│before") != null and
                     std.mem.indexOf(u8, visible, "   1│after") != null)
                 {
-                    try writePipe(input_write, "q");
+                    try writePipe(input_write, quit_input);
                     sent_quit = true;
                 }
             }

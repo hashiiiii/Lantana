@@ -7,6 +7,8 @@ const review = @import("review.zig");
 const raw_split = @import("raw_split.zig");
 const terminal = @import("terminal.zig");
 const text_selection = @import("text_selection.zig");
+const keymap = @import("keymap.zig");
+const shared = @import("keymap");
 
 pub const Color = struct { r: u8, g: u8, b: u8 };
 
@@ -18,11 +20,11 @@ pub const Theme = struct {
     added: Color = .{ .r = 91, .g = 224, .b = 135 },
 };
 
-pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Environ.Map, state: *review.Review, theme: Theme) !void {
+pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Environ.Map, state: *review.Review, theme: Theme, bindings: *const keymap.Bindings) !void {
     var buffer: [4096]u8 = undefined;
     var session = try terminal.Session.init(io, allocator, environ, &buffer);
     defer session.deinit();
-    var view: View = .{ .state = state, .theme = theme, .session = &session };
+    var view: View = .{ .state = state, .theme = theme, .session = &session, .bindings = bindings };
     try session.app.run(view.widget(), .{});
 }
 
@@ -64,6 +66,7 @@ const View = struct {
     state: *review.Review,
     theme: Theme,
     session: *terminal.Session,
+    bindings: *const keymap.Bindings,
     focus: Focus = .tree,
     tree_scroll: usize = 0,
     reveal_selection: bool = true,
@@ -114,58 +117,69 @@ const View = struct {
         if (self.dialog and std.meta.activeTag(value) != .tick) return self.handleDialog(ctx, value);
         switch (value) {
             .key_press => |key| {
-                if (key.matches('q', .{})) return self.quit(ctx);
-                if (key.matches(vaxis.Key.escape, .{})) {
-                    if (self.focus == .content) {
-                        self.focus = .tree;
-                    } else {
-                        self.dialog = true;
-                        self.dialog_choice = .cancel;
-                    }
-                } else if (key.matches(vaxis.Key.tab, .{})) {
-                    self.focus = if (self.focus == .tree) .content else .tree;
-                } else if (key.matches('m', .{})) {
-                    self.state.toggleMode();
-                    self.selection = null;
-                    self.focus = .content;
-                } else if (self.focus == .tree) {
-                    self.selection = null;
-                    if (key.matches(vaxis.Key.down, .{}) or key.matches('j', .{})) {
-                        try self.state.moveDown();
-                        self.reveal_selection = true;
-                    } else if (key.matches(vaxis.Key.up, .{}) or key.matches('k', .{})) {
-                        try self.state.moveUp();
-                        self.reveal_selection = true;
-                    } else if (key.matches(vaxis.Key.left, .{}) or key.matches('h', .{})) {
-                        try self.collapseOrFocusParent();
-                    } else if (key.matches(vaxis.Key.right, .{}) or key.matches('l', .{})) {
-                        try self.expandFolder();
-                    } else if (key.matches(vaxis.Key.enter, .{})) {
-                        if (self.state.currentNode()) |node| {
-                            if (node.kind == .folder) try self.toggleSelectedFolder() else self.focus = .content;
+                const contexts: []const keymap.Context = if (self.focus == .tree) &.{ .global, .tree } else &.{ .global, .content };
+                const action = self.bindings.resolve(contexts, shared.vaxisMatcher(key)) orelse return;
+                switch (action) {
+                    .quit => return self.quit(ctx),
+                    .back => {
+                        if (self.focus == .content) self.focus = .tree else {
+                            self.dialog = true;
+                            self.dialog_choice = .cancel;
                         }
-                    } else if (key.matches('c', .{})) {
-                        try self.toggleSelectedFolder();
-                    } else return;
-                } else if (key.matches(vaxis.Key.down, .{}) or key.matches('j', .{}) or key.matches(vaxis.Key.page_down, .{})) {
-                    self.state.scrollDown(if (key.matches(vaxis.Key.page_down, .{})) 10 else 1);
-                    try self.revealScrollbar(ctx, .vertical);
-                } else if (key.matches(vaxis.Key.up, .{}) or key.matches('k', .{}) or key.matches(vaxis.Key.page_up, .{})) {
-                    self.state.scrollUp(if (key.matches(vaxis.Key.page_up, .{})) 10 else 1);
-                    try self.revealScrollbar(ctx, .vertical);
-                } else if (key.matches(vaxis.Key.right, .{}) or key.matches('l', .{})) {
-                    self.state.panRight(1);
-                    try self.revealScrollbar(ctx, .horizontal);
-                } else if (key.matches(vaxis.Key.left, .{}) or key.matches('h', .{})) {
-                    self.state.panLeft(1);
-                    try self.revealScrollbar(ctx, .horizontal);
-                } else return;
+                    },
+                    .focus_next => self.focus = if (self.focus == .tree) .content else .tree,
+                    .toggle_render_mode => {
+                        self.state.toggleMode();
+                        self.selection = null;
+                        self.focus = .content;
+                    },
+                    else => try self.dispatchKeyAction(ctx, action),
+                }
                 ctx.consumeAndRedraw();
             },
             .mouse => |mouse| try self.handleMouse(ctx, mouse),
             .tick => self.expireScrollbar(ctx),
             .winsize => ctx.consumeAndRedraw(),
             else => {},
+        }
+    }
+
+    fn dispatchKeyAction(self: *View, ctx: *vxfw.EventContext, action: keymap.Action) !void {
+        if (self.focus == .tree) self.selection = null;
+        switch (action) {
+            .move_down => {
+                try self.state.moveDown();
+                self.reveal_selection = true;
+            },
+            .move_up => {
+                try self.state.moveUp();
+                self.reveal_selection = true;
+            },
+            .collapse_or_focus_parent => try self.collapseOrFocusParent(),
+            .expand_folder => try self.expandFolder(),
+            .activate => {
+                if (self.state.currentNode()) |node| {
+                    if (node.kind == .folder) try self.toggleSelectedFolder() else self.focus = .content;
+                }
+            },
+            .toggle_folder => try self.toggleSelectedFolder(),
+            .scroll_down, .page_down => {
+                self.state.scrollDown(if (action == .page_down) 10 else 1);
+                try self.revealScrollbar(ctx, .vertical);
+            },
+            .scroll_up, .page_up => {
+                self.state.scrollUp(if (action == .page_up) 10 else 1);
+                try self.revealScrollbar(ctx, .vertical);
+            },
+            .pan_right => {
+                self.state.panRight(1);
+                try self.revealScrollbar(ctx, .horizontal);
+            },
+            .pan_left => {
+                self.state.panLeft(1);
+                try self.revealScrollbar(ctx, .horizontal);
+            },
+            else => unreachable,
         }
     }
 
@@ -220,22 +234,21 @@ const View = struct {
     fn handleDialog(self: *View, ctx: *vxfw.EventContext, value: vxfw.Event) !void {
         switch (value) {
             .key_press => |key| {
-                if (key.matches(vaxis.Key.escape, .{}) or key.matches('n', .{})) {
-                    self.dialog = false;
-                } else if (key.matches('y', .{})) {
-                    self.dialog = false;
-                    return self.quit(ctx);
-                } else if (key.matches(vaxis.Key.left, .{})) {
-                    self.dialog_choice = .cancel;
-                } else if (key.matches(vaxis.Key.right, .{})) {
-                    self.dialog_choice = .quit;
-                } else if (key.matches(vaxis.Key.enter, .{})) {
-                    if (self.dialog_choice == .quit) {
+                const action = self.bindings.resolve(&.{.dialog}, shared.vaxisMatcher(key)) orelse return ctx.consumeEvent();
+                switch (action) {
+                    .cancel => self.dialog = false,
+                    .confirm => {
                         self.dialog = false;
                         return self.quit(ctx);
-                    }
-                    self.dialog = false;
-                } else return ctx.consumeEvent();
+                    },
+                    .choose_cancel => self.dialog_choice = .cancel,
+                    .choose_quit => self.dialog_choice = .quit,
+                    .activate_choice => {
+                        self.dialog = false;
+                        if (self.dialog_choice == .quit) return self.quit(ctx);
+                    },
+                    else => unreachable,
+                }
                 ctx.consumeAndRedraw();
             },
             .mouse => |mouse| {

@@ -45,6 +45,7 @@ pub const Session = struct {
         const size: c.struct_winsize = .{ .ws_row = 24, .ws_col = 80, .ws_xpixel = 0, .ws_ypixel = 0 };
         if (c.ioctl(slave, c.TIOCSWINSZ, &size) != 0) return error.ResizeFailed;
         const repo_path = try arena.dupeZ(u8, repo.path);
+        const config_path = try arena.dupeZ(u8, try std.fs.path.join(arena, &.{ repo.path, ".git", "xdg" }));
         const pager_executable = try std.Io.Dir.cwd().realPathFileAlloc(io, pager_path, arena);
         const pager_dir = std.fs.path.dirname(pager_executable) orelse return error.MissingPagerDirectory;
         const inherited_path: []const u8 = if (c.getenv("PATH")) |path| std.mem.span(path) else "";
@@ -63,6 +64,8 @@ pub const Session = struct {
             _ = c.unsetenv("PAGER");
             _ = c.setenv("PATH", pager_path_value.ptr, 1);
             _ = c.setenv("TERM", "xterm-256color", 1);
+            // User remappings must not affect default-key regression cases.
+            _ = c.setenv("XDG_CONFIG_HOME", config_path.ptr, 1);
             const command = if (wide_diff)
                 "before=$(stty -g); git --paginate diff --unified=100; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\""
             else if (!paginate)

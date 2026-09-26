@@ -83,12 +83,22 @@ pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
     }
     if (bytes.items.len == 0) return 0;
 
+    var error_buffer: [4096]u8 = undefined;
+    var stderr: std.Io.File.Writer = .init(.stderr(), init.io, &error_buffer);
+    var bindings = lantana.keymap.loadUser(init.io, arena, init.environ_map, &stderr.interface) catch |err| {
+        try writeOutput(init.io, bytes.items);
+        if (err != error.InvalidKeymap) try stderr.interface.print("Keymap load failed: {s}\n", .{@errorName(err)});
+        try stderr.interface.flush();
+        return 2;
+    };
+    defer bindings.deinit();
     var git_context: GitContext = .{ .io = init.io };
     lantana.run(arena, bytes.items, .{
         .io = init.io,
         .environ = init.environ_map,
         .renderer = renderer,
         .file_text = .{ .context = &git_context, .load = GitContext.load },
+        .keymap = &bindings,
     }) catch |err| {
         var output_buffer: [4096]u8 = undefined;
         var output: std.Io.File.Writer = .init(.stdout(), init.io, &output_buffer);

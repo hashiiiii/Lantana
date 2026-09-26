@@ -6,6 +6,8 @@ pub const git_patch = @import("git_patch.zig");
 pub const raw_split = @import("raw_split.zig");
 pub const review = @import("review.zig");
 pub const document = @import("document.zig");
+pub const keymap = @import("keymap.zig");
+pub const Keymap = keymap.Bindings;
 
 pub const Color = tui.Color;
 pub const Theme = tui.Theme;
@@ -22,6 +24,7 @@ pub const Options = struct {
     theme: Theme = .{},
     renderer: ?DocumentRenderer = null,
     file_text: ?FileTextProvider = null,
+    keymap: ?*const Keymap = null,
 };
 
 /// The caller retains ownership of the captured patch and handles a terminal error.
@@ -32,7 +35,13 @@ pub fn run(allocator: std.mem.Allocator, patch: []const u8, options: Options) !v
     const arena = memory.allocator();
     const parsed = try git_patch.parse(arena, patch);
     var state = try review.Review.initWithFileText(arena, parsed, options.renderer, options.file_text);
-    try tui.run(options.io, arena, options.environ, &state, options.theme);
+    var owned: ?Keymap = null;
+    defer if (owned) |*bindings| bindings.deinit();
+    const bindings = options.keymap orelse blk: {
+        owned = try keymap.defaults(arena);
+        break :blk &owned.?;
+    };
+    try tui.run(options.io, arena, options.environ, &state, options.theme, bindings);
 }
 
 test {
