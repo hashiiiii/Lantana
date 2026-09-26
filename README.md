@@ -4,7 +4,7 @@
 [![Release](https://img.shields.io/github/v/release/hashiiiii/Lantana)](https://github.com/hashiiiii/Lantana/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/hashiiiii/Lantana/ci.yml?branch=main&label=CI)](https://github.com/hashiiiii/Lantana/actions/workflows/ci.yml)
 
-Lantana shows Git patches in a terminal. It groups changed files in a tree and shows text changes side by side. Use the `lantana` command as a Git diff pager, or embed the Zig module in another program.
+Lantana is a terminal viewer for Git patches, with a file tree and side-by-side diffs. Use the `lantana` command or embed the Zig module.
 
 ## Installation
 
@@ -33,17 +33,16 @@ Download the ZIP archive for your platform from [GitHub Releases](https://github
 
 ## Usage
 
-View changes that have not been staged with `git add`:
+View staged and unstaged changes:
 
 ```sh
-git diff | lantana
+git diff HEAD | lantana
 ```
 
-View staged changes that will go into the next commit:
-
-```sh
-git diff --cached | lantana
-```
+| Changes | Command |
+| --- | --- |
+| Unstaged | `git diff \| lantana` |
+| Staged | `git diff --cached \| lantana` |
 
 ### Git integration
 
@@ -59,19 +58,15 @@ Choose a scope:
 
 | Command | Git configuration |
 | --- | --- |
-| `lantana set --project` | Current clone, with the choice recorded in `.lantana.gitconfig` |
+| `lantana set --project` | Current clone; creates `.lantana.gitconfig` |
 | `lantana set --local` | Current clone |
 | `lantana set --user` | Global |
 
-Without a flag, `set` and `unset` use `--local`. Use the same scope when removing the integration, for example `lantana unset --user`.
+The default scope is `--local`. Use the same flag with `unset`.
 
-With `--project`, commit `.lantana.gitconfig` to share the pager choice. Run `lantana set --project` once in each clone to activate it.
+With `--project`, commit `.lantana.gitconfig`. Run `lantana set --project` once in each clone to activate it.
 
-Git selects pagers through [`pager.diff`](https://git-scm.com/docs/git-config). [`.gitattributes`](https://git-scm.com/docs/gitattributes) selects diff and merge drivers for individual files. Using a pager lets Lantana show all changed files together.
-
-`set` leaves another configured diff pager untouched. `unset` removes only Lantana's setting in the selected scope. `GIT_PAGER` and `git --paginate` can override `pager.diff`.
-
-In the file tree, use Up and Down to select a file, and Enter to focus its diff. Use Up, Down, `j`, and `k` to scroll. Press Esc to return to the tree, or `q` to quit. Lantana reads the patch and leaves the repository unchanged.
+Use Up/Down to select files and Enter to focus the diff. Scroll with Up/Down or `j`/`k`. Press Esc to return to the tree or `q` to quit.
 
 ## Development
 
@@ -82,21 +77,25 @@ mise install
 zig build
 zig build test
 zig build check
+bash e2e/cli.sh
 ```
 
-`zig build` installs `lantana` to `zig-out/bin/`. `zig build test` runs unit tests and terminal tests with real Git. The terminal tests use a PTY on macOS and Linux and ConPTY on Windows. Run `bash e2e/cli.sh` after building to check `set` and `unset`. VS Code resolves Zig and ZLS from `PATH`; expose the mise tools to VS Code before opening the workspace.
+`zig build` installs `lantana` to `zig-out/bin/`.
 
-To try a repository with varied changes:
+Create and open the demo:
 
 ```sh
 zig build demo
 cd .zig-cache/lantana-demo
-git diff --cached | ../../zig-out/bin/lantana
+git diff HEAD | ../../zig-out/bin/lantana
 ```
 
-The demo stages its changes with `git add`, so `--cached` shows those changes against its last commit. A plain `git diff` is empty immediately after generation.
-
-The Zig module is in `src/`, terminal tests are in `e2e/`, Git fixtures and demo tools are in `tools/`, and release package templates are in `pkg/`.
+| Directory | Contents |
+| --- | --- |
+| `src/` | Zig library and CLI |
+| `e2e/` | Terminal and CLI tests |
+| `tools/` | Git fixture and demo generators |
+| `pkg/` | Release package templates |
 
 ## Contributing
 
