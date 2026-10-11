@@ -81,7 +81,8 @@ pub fn render(
     }
 
     const sums_path = try std.fs.path.join(arena, &.{ dist_path, "SHA256SUMS" });
-    // The aggregate release step rewrites archives in its install directory, so its old sums file is stale input; downloaded packages still validate the supplied file.
+    // The aggregate release step overwrites archives in its install directory, so its old checksum file is stale.
+    // Downloaded packages still validate the supplied checksum file.
     if (checksum_path == null) {
         if (try readOptional(arena, io, sums_path)) |existing_sums| {
             try validateChecksumManifest(existing_sums, &hashes);

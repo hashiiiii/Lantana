@@ -163,7 +163,7 @@ test "CLI configuration commands preserve Git settings in isolated environments"
     try std.testing.expectEqualStrings("12\n", try expectGit(arena, &environment, project, &.{ "config", "--file", project_config, "--get", "core.abbrev" }));
 }
 
-test "invalid keymap reports its path and preserves captured patch bytes" {
+test "invalid keymap reports diagnostics and preserves captured patch bytes" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
@@ -175,30 +175,38 @@ test "invalid keymap reports its path and preserves captured patch bytes" {
     var environment = try isolatedEnvironment(arena, root);
     defer environment.deinit();
     try scratch.dir.createDirPath(io, "xdg/lantana");
-    try scratch.dir.writeFile(io, .{ .sub_path = "xdg/lantana/keymap.toml", .data = "[global]\nquit=1\n" });
     const patch = "diff --git a/A.cs b/A.cs\n--- a/A.cs\n+++ b/A.cs\n@@ -1 +1 @@\n-before\n+after\n";
     try scratch.dir.writeFile(io, .{ .sub_path = "input", .data = patch });
-    const input = try scratch.dir.openFile(io, "input", .{});
-    defer input.close(io);
-    const output = try scratch.dir.createFile(io, "output", .{});
-    defer output.close(io);
-    const errors = try scratch.dir.createFile(io, "errors", .{});
-    defer errors.close(io);
     const executable = try std.Io.Dir.cwd().realPathFileAlloc(io, pager_path, arena);
-    var child = try std.process.spawn(io, .{
-        .argv = &.{executable},
-        .environ_map = &environment,
-        .stdin = .{ .file = input },
-        .stdout = .{ .file = output },
-        .stderr = .{ .file = errors },
-    });
-    defer child.kill(io);
-    // Configuration errors must preserve the original patch even without a terminal.
-    try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, try child.wait(io));
-    try std.testing.expectEqualStrings(patch, try scratch.dir.readFileAlloc(io, "output", arena, .limited(4096)));
-    const stderr = try scratch.dir.readFileAlloc(io, "errors", arena, .limited(4096));
-    const config_path = try path(arena, &.{ root, "xdg", "lantana", "keymap.toml" });
-    try std.testing.expect(std.mem.indexOf(u8, stderr, config_path) != null);
+    const config_path = try path(arena, &.{ root, "xdg", "lantana", "keymap.json" });
+    const cases = [_]struct { json: []const u8, location: []const u8, message: []const u8 }{
+        .{ .json = "{\"global\": {\"quit\": 1}}", .location = ": ", .message = "global.quit" },
+        .{ .json = "{\n  \"global\":\n}", .location = ":3:1: ", .message = "Invalid JSON" },
+    };
+    for (cases) |case| {
+        try scratch.dir.writeFile(io, .{ .sub_path = "xdg/lantana/keymap.json", .data = case.json });
+        const input = try scratch.dir.openFile(io, "input", .{});
+        defer input.close(io);
+        const output = try scratch.dir.createFile(io, "output", .{});
+        defer output.close(io);
+        const errors = try scratch.dir.createFile(io, "errors", .{});
+        defer errors.close(io);
+        var child = try std.process.spawn(io, .{
+            .argv = &.{executable},
+            .environ_map = &environment,
+            .stdin = .{ .file = input },
+            .stdout = .{ .file = output },
+            .stderr = .{ .file = errors },
+        });
+        defer child.kill(io);
+        // Both syntax and binding errors must identify the configuration without losing the piped patch.
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, try child.wait(io));
+        try std.testing.expectEqualStrings(patch, try scratch.dir.readFileAlloc(io, "output", arena, .limited(4096)));
+        const stderr = try scratch.dir.readFileAlloc(io, "errors", arena, .limited(4096));
+        const location = try std.fmt.allocPrint(arena, "{s}{s}", .{ config_path, case.location });
+        try std.testing.expect(std.mem.indexOf(u8, stderr, location) != null);
+        try std.testing.expect(std.mem.indexOf(u8, stderr, case.message) != null);
+    }
     // Informational and empty-input commands do not enter the interactive loader.
     try std.testing.expectEqualStrings("lantana " ++ @import("build_options").version ++ "\n", try expectCli(arena, &environment, root, executable, &.{"--version"}));
     try std.testing.expectEqualStrings("", try expectCli(arena, &environment, root, executable, &.{}));

@@ -31,7 +31,7 @@ fn cellColumn(frame: []const u8, needle: []const u8) !usize {
     return error.MissingFrameText;
 }
 
-test "custom quit retains default navigation and cannot escape the quit dialog" {
+test "JSON configuration leaves omitted and empty actions unbound" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
@@ -43,13 +43,19 @@ test "custom quit retains default navigation and cannot escape the quit dialog" 
     try repo.commit();
     try repo.write("A.cs", "after-first\n");
     try repo.write("B.cs", "after-second\n");
-    try repo.write(".git/xdg/lantana/keymap.toml", "[global]\nquit=[\"x\"]\n");
+    try repo.write(".git/xdg/lantana/keymap.json",
+        \\{
+        \\  "global": {"quit": ["x x"], "back": ["Escape"], "toggle_render_mode": []},
+        \\  "tree": {"move_up": ["k"], "move_down": ["j"]},
+        \\  "dialog": {"cancel": ["n"], "choose_quit": ["Right"]}
+        \\}
+    );
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
     try session.waitFor("before-first");
-    // The old q must be unbound; omitted navigation and modal commands remain active.
+    // Omitted Tab and empty render-mode keys must not interfere with explicitly configured navigation.
     var frame = session.screen.frame;
-    try session.send("qj");
+    try session.send("qm\tj");
     _ = try session.waitFrame("before-second", frame);
     frame = session.screen.frame;
     try session.send("\x1b");
@@ -60,7 +66,32 @@ test "custom quit retains default navigation and cannot escape the quit dialog" 
     frame = session.screen.frame;
     try session.send("nk");
     _ = try session.waitFrame("before-first", frame);
-    try session.finishAfterInput("x");
+    try session.finishAfterInput("xx");
+}
+
+test "main view ignores dialog actions and quit dialog ignores main actions" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Example.cs", "before\n", "after\n");
+    defer repo.deinit();
+    try repo.write(".git/xdg/lantana/keymap.json",
+        \\{
+        \\  "global": {"quit": ["q"], "back": ["Escape"], "confirm": ["c"]},
+        \\  "dialog": {"cancel": ["n"], "choose_quit": ["Right"], "move_down": ["j"]}
+        \\}
+    );
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    try session.waitFor("before");
+    // JSON accepts known actions in any context; inactive view commands must not crash the viewer.
+    var frame = session.screen.frame;
+    try session.send("c\x1b");
+    _ = try session.waitFrame("[Cancel]", frame);
+    frame = session.screen.frame;
+    try session.send("j\x1b[C");
+    _ = try session.waitFrame("[Quit]", frame);
+    try session.finishAfterInput("nq");
 }
 
 test "embedded viewer uses injected bindings without reading the CLI config" {
@@ -73,11 +104,37 @@ test "embedded viewer uses injected bindings without reading the CLI config" {
     const command = std.mem.trim(u8, try repo.git(&.{ "config", "--get", "core.pager" }), "\r\n");
     _ = try repo.git(&.{ "config", "core.pager", try std.fmt.allocPrint(arena, "{s} --embedded-keymap", .{command}) });
     // Embedders must receive their own bindings even when the CLI's user file is invalid.
-    try repo.write(".git/xdg/lantana/keymap.toml", "invalid TOML");
+    try repo.write(".git/xdg/lantana/keymap.json", "invalid JSON");
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
     try session.waitFor("before");
     try session.finishAfterInput("x");
+}
+
+test "mouse focus changes cancel pending global sequences" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Example.cs", "before\n", "after\n");
+    defer repo.deinit();
+    try repo.write(".git/xdg/lantana/keymap.json",
+        \\{"global": {"quit": ["x x"]}}
+    );
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("before", 0);
+
+    // Global bindings stay active in both panes, so mouse focus changes must discard unfinished sequences.
+    var frame = session.screen.frame;
+    try session.send("x\x1b[<0;40;1M\x1b[<0;40;1m");
+    _ = try session.waitFrame("before", frame);
+    frame = session.screen.frame;
+    try session.send("x\x1b[<0;8;2M\x1b[<0;8;2m");
+    _ = try session.waitFrame("before", frame);
+    frame = session.screen.frame;
+    try session.send("x\x1b[<0;40;1M\x1b[<0;40;1m");
+    _ = try session.waitFrame("before", frame);
+    try session.finishAfterInput("xx");
 }
 
 test "Git pager reads its pipe and restores the real terminal" {
@@ -467,7 +524,7 @@ test "mouse wheel scroll can move the selected file outside the visible tree" {
     try expectUnchanged(&repo, status, config);
 }
 
-test "Git pager shows added deleted renamed binary mode and quoted path changes" {
+test "Git pager displays additions, deletions, renames, binary files, mode changes, and quoted paths" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
@@ -522,7 +579,7 @@ test "Git pager shows added deleted renamed binary mode and quoted path changes"
     try expectUnchanged(&repo, status, config);
 }
 
-test "Git viewer navigates document raw tree mouse and resize without changing the repository" {
+test "document and raw views support tree navigation, mouse input, and resizing without changing the repository" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();

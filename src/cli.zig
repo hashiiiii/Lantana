@@ -87,7 +87,7 @@ pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
     var stderr: std.Io.File.Writer = .init(.stderr(), init.io, &error_buffer);
     var bindings = lantana.keymap.loadUser(init.io, arena, init.environ_map, &stderr.interface) catch |err| {
         try writeOutput(init.io, bytes.items);
-        if (err != error.InvalidKeymap) try stderr.interface.print("Keymap load failed: {s}\n", .{@errorName(err)});
+        if (err != error.InvalidKeymap) try stderr.interface.print("Could not load key bindings: {s}\n", .{@errorName(err)});
         try stderr.interface.flush();
         return 2;
     };
@@ -98,13 +98,13 @@ pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
         .environ = init.environ_map,
         .renderer = renderer,
         .file_text = .{ .context = &git_context, .load = GitContext.load },
-        .keymap = &bindings,
+        .bindings = &bindings,
     }) catch |err| {
         var output_buffer: [4096]u8 = undefined;
         var output: std.Io.File.Writer = .init(.stdout(), init.io, &output_buffer);
         try output.interface.writeAll(bytes.items);
         try output.interface.flush();
-        std.log.err("terminal unavailable: {s}", .{@errorName(err)});
+        std.log.err("viewer failed: {s}", .{@errorName(err)});
         return 2;
     };
     return 0;

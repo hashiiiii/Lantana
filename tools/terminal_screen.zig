@@ -163,7 +163,7 @@ pub const Screen = struct {
     }
 };
 
-test "split frame escape and wide glyph keep terminal columns" {
+test "partial escape sequences and wide glyphs preserve terminal columns" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     var screen = try Screen.init(memory.allocator(), 4, 1);

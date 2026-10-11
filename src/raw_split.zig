@@ -322,7 +322,7 @@ test "real Git hunks align unequal changes and preserve line numbers" {
     try expect(parsed[9].after.?.no_newline);
 }
 
-test "binary mode-only and malformed hunks remain visible as raw rows" {
+test "binary, mode-only, and malformed patches remain visible as raw rows" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();

@@ -31,7 +31,7 @@ test "Git pager opens and closes a native ConPTY without changing the repository
     try std.testing.expectEqualStrings("", empty.stdout);
 }
 
-test "ConPTY loads a custom quit binding from keymap.toml" {
+test "ConPTY loads a quit sequence from keymap.json" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
@@ -41,9 +41,11 @@ test "ConPTY loads a custom quit binding from keymap.toml" {
     try repo.write("Example.cs", "before\n");
     try repo.commit();
     try repo.write("Example.cs", "after\n");
-    try repo.write(".git/xdg/lantana/keymap.toml", "[global]\nquit=[\"x\"]\n");
-    // The default q cannot close this viewer; the injected terminal input must use x.
-    const result = try runConPty(arena, std.testing.io, &repo, "x");
+    try repo.write(".git/xdg/lantana/keymap.json",
+        \\{"global": {"quit": ["x x"]}}
+    );
+    // Both presses must reach the viewer before the sequence can quit.
+    const result = try runConPty(arena, std.testing.io, &repo, "xx");
     try std.testing.expectEqual(@as(u32, 0), result.exit_code);
     try std.testing.expect(result.sent_quit);
 }

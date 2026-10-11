@@ -16,13 +16,22 @@ pub fn main(init: std.process.Init) !u8 {
             if (count == 0) break;
             try patch.appendSlice(arena, chunk[0..count]);
         }
-        var bindings = (try lantana.Keymap.load(arena, lantana.keymap.specification, "[global]\nquit=[\"x\"]\n")).bindings;
+        var bindings = switch (try lantana.Bindings.load(arena,
+            \\{"global": {"quit": ["x"]}}
+        )) {
+            .bindings => |bindings| bindings,
+            .invalid => |value| {
+                var diagnostic = value;
+                defer diagnostic.deinit();
+                return error.InvalidKeymap;
+            },
+        };
         defer bindings.deinit();
         try lantana.run(arena, patch.items, .{
             .io = init.io,
             .environ = init.environ_map,
             .renderer = .{ .render = renderDocument },
-            .keymap = &bindings,
+            .bindings = &bindings,
         });
         return 0;
     }
