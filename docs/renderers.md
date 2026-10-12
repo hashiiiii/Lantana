@@ -1,4 +1,4 @@
-# Renderer plugins
+# External renderers
 
 Lantana can run an external command to render a file-specific view. A successful view opens in the content pane; press `m` to switch to the raw diff.
 
@@ -13,25 +13,6 @@ The first diff session creates `renderers.json` beside `keymap.json`, without ov
 | macOS / Linux | `$HOME/.config/lantana/renderers.json` |
 
 The default file contains `[]`. Edit it and restart Lantana.
-
-### PrefabLens
-
-Install [PrefabLens](https://github.com/hashiiiii/PrefabLens#installation), then use this configuration:
-
-```json
-[
-  {
-    "patterns": ["*.prefab", "*.unity", "*.asset", "*.mat", "*.controller", "*.anim"],
-    "command": ["prefablens", "--color", "--project", "{repo}", "{before}", "{after}"]
-  }
-]
-```
-
-Run `lantana set` in the repository, then `git diff`. UnityYAML files show their semantic diff, while ordinary files keep Lantana's raw diff.
-
-For a Unity project nested inside a repository, replace `{repo}` after `--project` with its absolute directory.
-
-PrefabLens remains an optional installed command. Lantana has no PrefabLens package dependency or built-in UnityYAML rules.
 
 ## Command contract
 
@@ -70,10 +51,27 @@ A viewer can use additional literal arguments. Place `--` before path arguments 
 
 The existing Zig `DocumentRenderer` API also supports applications that embed Lantana. Successful documents open by default and remain switchable to raw.
 
-## Verify the PrefabLens integration
+## Example: PrefabLens
+
+Install [PrefabLens](https://github.com/hashiiiii/PrefabLens#installation), then register it like any other external command:
+
+```json
+[
+  {
+    "patterns": ["*.prefab", "*.unity", "*.asset", "*.mat", "*.controller", "*.anim"],
+    "command": ["prefablens", "--color", "--project", "{repo}", "{before}", "{after}"]
+  }
+]
+```
+
+Run `lantana set` in the repository, then `git diff`. Matching UnityYAML files show their semantic diff; other files keep the raw diff.
+
+For a Unity project nested inside a repository, replace `{repo}` after `--project` with its absolute directory.
+
+Verify an installed executable with this optional POSIX terminal test:
 
 ```sh
 zig build test-prefablens -Dprefablens=/absolute/path/to/prefablens
 ```
 
-This optional POSIX terminal test launches plain `git diff` with mixed UnityYAML and C# changes. The normal build and test suite require no PrefabLens installation.
+The test launches plain `git diff` with mixed UnityYAML and C# changes, including a staged comparison with later worktree edits.

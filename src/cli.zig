@@ -94,16 +94,19 @@ pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
     };
     defer bindings.deinit();
     var git_context: GitContext = .{ .io = init.io };
-    var plugins = renderer_plugin.Renderer.load(init.io, arena, init.environ_map, &git_context, &stderr.interface) catch {
-        try stderr.interface.flush();
-        try writeOutput(init.io, bytes.items);
-        return 2;
-    };
-    defer plugins.deinit();
+    var plugins: ?renderer_plugin.Renderer = null;
+    if (renderer == null) {
+        plugins = renderer_plugin.Renderer.load(init.io, arena, init.environ_map, &git_context, &stderr.interface) catch {
+            try stderr.interface.flush();
+            try writeOutput(init.io, bytes.items);
+            return 2;
+        };
+    }
+    defer if (plugins) |*value| value.deinit();
     lantana.run(arena, bytes.items, .{
         .io = init.io,
         .environ = init.environ_map,
-        .renderer = renderer orelse .{ .context = &plugins, .render = renderer_plugin.Renderer.render },
+        .renderer = renderer orelse .{ .context = &plugins.?, .render = renderer_plugin.Renderer.render },
         .file_text = .{ .context = &git_context, .load = GitContext.load },
         .bindings = &bindings,
     }) catch |err| {

@@ -709,6 +709,8 @@ test "document and raw views support tree navigation, mouse input, and resizing 
     try repo.write("Assets/B.meta", "guid: after\n");
     try repo.write("Scripts/C.cs", "class C { int value = 2; }\n");
     try repo.write("Image.png", "\x89PNG\x00after");
+    // Caller-provided documents must remain usable when external command settings are invalid.
+    try repo.write(".git/xdg/lantana/renderers.json", "invalid renderer config\n");
     const status_before = try repo.git(&.{ "status", "--porcelain=v1" });
     const config_before = try repo.read(".git/config");
     var session = try Session.start(arena, std.testing.io, &repo, true);
