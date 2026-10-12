@@ -341,7 +341,7 @@ test "ordinary Git sections retain exact bytes and do not split on hunk text" {
     for (patch.files) |file| try expectEqualStrings(source[file.start..file.end], file.raw);
 }
 
-test "Git change kinds retain selectable additions deletions renames binary and mode changes" {
+test "Git additions, deletions, renames, binary files, and mode changes remain selectable" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const patch = try parseFixture(memory.allocator(), "kinds.patch");
@@ -370,7 +370,7 @@ test "line counts include every hunk and ignore newline markers" {
     try expectEqual(@as(usize, 2), patch.files[0].removed_lines);
 }
 
-test "Git C quoted paths decode spaces quotes tabs and Unicode" {
+test "C-style Git paths decode spaces, quotes, tabs, and Unicode" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const patch = try parseFixture(memory.allocator(), "paths.patch");
@@ -382,7 +382,7 @@ test "Git C quoted paths decode spaces quotes tabs and Unicode" {
     try expectEqualStrings("日本語.prefab", patch.files[3].display_path);
 }
 
-test "renamed Git path may quote only one side" {
+test "Git renames parse when only one path is quoted" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const patch = try parseFixture(memory.allocator(), "mixed_rename.patch");
@@ -430,7 +430,7 @@ test "colored Git headers parse without changing their original bytes" {
     for (patch.files) |file| try expectEqualStrings(source[file.start..file.end], file.raw);
 }
 
-test "malformed and combined input remains available as raw text" {
+test "malformed and combined patches remain available as raw text" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     for ([_][]const u8{ "not a patch\n", "diff --cc File.cs\n@@@ -1,1 -1,1 +1,1 @@@\n" }) |source| {

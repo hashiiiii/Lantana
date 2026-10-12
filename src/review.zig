@@ -336,7 +336,7 @@ fn renderTextOnly(_: ?*anyopaque, arena: std.mem.Allocator, file: FileMetadata) 
     return .{ .text = try std.fmt.allocPrint(arena, "{s}", .{file.new_path orelse file.old_path orelse "unknown"}) };
 }
 
-test "review cursor visits folders and keeps each file mode and scroll position" {
+test "folder navigation preserves each file's view mode and scroll position" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();

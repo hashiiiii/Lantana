@@ -4,7 +4,8 @@
 [![Release](https://img.shields.io/github/v/release/hashiiiii/Lantana)](https://github.com/hashiiiii/Lantana/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/hashiiiii/Lantana/ci.yml?branch=main&label=CI)](https://github.com/hashiiiii/Lantana/actions/workflows/ci.yml)
 
-Lantana is a terminal viewer for Git patches, with a file tree and side-by-side diffs. Use the `lantana` command or embed the Zig module.
+Lantana displays Git patches in a terminal, with a file tree and side-by-side diffs.
+Run `lantana` or embed its Zig module.
 
 ## Installation
 
@@ -29,7 +30,8 @@ mise use -g github:hashiiiii/Lantana
 
 ### Manual
 
-Download the ZIP archive for your platform from [GitHub Releases](https://github.com/hashiiiii/Lantana/releases). Extract the `lantana` executable (`lantana.exe` on Windows) and add its directory to your `PATH`.
+Download the ZIP archive for your platform from [GitHub Releases](https://github.com/hashiiiii/Lantana/releases).
+Extract `lantana` (`lantana.exe` on Windows), then add its directory to your `PATH`.
 
 ## Usage
 
@@ -46,7 +48,7 @@ git diff HEAD | lantana
 
 ### Git integration
 
-To open Lantana with a regular `git diff`, set the diff pager:
+To use Lantana for `git diff`, configure Git's diff pager:
 
 ```sh
 lantana set
@@ -70,24 +72,21 @@ Use Up/Down to select files and Enter to focus the diff. Scroll with Up/Down or 
 
 ### Keymap
 
-Create `keymap.toml` in your configuration directory:
+Without a configuration file, Lantana uses the [built-in keymap](src/keymap.json).
+To customize bindings, copy it to your configuration directory as `keymap.json` and edit the keys:
 
 | Environment | Path |
 | --- | --- |
-| `XDG_CONFIG_HOME` is set | `$XDG_CONFIG_HOME/lantana/keymap.toml` |
-| Windows | `%APPDATA%/lantana/keymap.toml` |
-| macOS / Linux | `$HOME/.config/lantana/keymap.toml` |
+| `XDG_CONFIG_HOME` is nonempty | `$XDG_CONFIG_HOME/lantana/keymap.json` |
+| Windows | `%APPDATA%/lantana/keymap.json` |
+| macOS / Linux | `$HOME/.config/lantana/keymap.json` |
 
-```toml
-[global]
-quit = ["Ctrl+q"]
+The file defines all bindings. Omitted actions and empty arrays have no keys assigned.
+Global bindings take priority over bindings for the focused pane.
+Only dialog bindings are active while the quit dialog is open.
+Dialog actions are ignored outside the dialog; other actions are ignored inside it.
 
-[content]
-page_down = ["Ctrl+d"]
-page_up = ["Ctrl+u"]
-```
-
-Arrays replace an action's keys. Unspecified actions retain their defaults. `[]` disables an action.
+The built-in keymap groups actions as follows:
 
 | Context | Actions |
 | --- | --- |
@@ -96,8 +95,20 @@ Arrays replace an action's keys. Unspecified actions retain their defaults. `[]`
 | `content` | `scroll_up`, `scroll_down`, `page_up`, `page_down`, `pan_left`, `pan_right` |
 | `dialog` | `cancel`, `confirm`, `choose_cancel`, `choose_quit`, `activate_choice` |
 
+Any listed action can be assigned to any listed context.
+
 Use one character or a named key with modifiers, such as `Down`, `Enter`, `Escape`, `Ctrl+q`, or `Shift+Enter`.
+Separate successive presses with spaces, such as `x x`. Sequences have no timeout.
 See [zig-keymap](https://github.com/hashiiiii/zig-keymap#keys) for supported keys.
+
+If the CLI cannot load key bindings, it prints an error and returns status `2`.
+Diagnostics include the file path and, for JSON syntax errors, the line and column.
+It writes the captured patch to standard output.
+
+Embedded viewers use built-in bindings unless `Options.bindings` supplies a caller-owned `lantana.Bindings` instance.
+`lantana.Bindings.load(allocator, json)` returns `.bindings` or an owned `.invalid` diagnostic.
+Call `deinit()` on the returned bindings or diagnostic.
+Each terminal session clears pending input when it starts and ends.
 
 ## Development
 
@@ -118,7 +129,7 @@ Build the release archives and package files:
 zig build release
 ```
 
-Archives are written to `zig-out/release/`. Homebrew and Scoop files are written to `zig-out/packages/`.
+Archives are in `zig-out/release/`. The Homebrew formula, Scoop manifest, and checksums are in `zig-out/packages/`.
 
 Create and open the demo:
 

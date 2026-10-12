@@ -20,7 +20,9 @@ pub const Theme = struct {
     added: Color = .{ .r = 91, .g = 224, .b = 135 },
 };
 
-pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Environ.Map, state: *review.Review, theme: Theme, bindings: *const keymap.Bindings) !void {
+pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Environ.Map, state: *review.Review, theme: Theme, bindings: *keymap.Bindings) !void {
+    bindings.cancel();
+    defer bindings.cancel();
     var buffer: [4096]u8 = undefined;
     var session = try terminal.Session.init(io, allocator, environ, &buffer);
     defer session.deinit();
@@ -66,7 +68,7 @@ const View = struct {
     state: *review.Review,
     theme: Theme,
     session: *terminal.Session,
-    bindings: *const keymap.Bindings,
+    bindings: *keymap.Bindings,
     focus: Focus = .tree,
     tree_scroll: usize = 0,
     reveal_selection: bool = true,
@@ -118,7 +120,11 @@ const View = struct {
         switch (value) {
             .key_press => |key| {
                 const contexts: []const keymap.Context = if (self.focus == .tree) &.{ .global, .tree } else &.{ .global, .content };
-                const action = self.bindings.resolve(contexts, shared.vaxisMatcher(key)) orelse return;
+                const action = switch (self.bindings.receive(contexts, shared.libvaxisMatcher(key))) {
+                    .action => |action| action,
+                    .pending => return ctx.consumeEvent(),
+                    .none => return,
+                };
                 switch (action) {
                     .quit => return self.quit(ctx),
                     .back => {
@@ -133,6 +139,7 @@ const View = struct {
                         self.selection = null;
                         self.focus = .content;
                     },
+                    .cancel, .confirm, .choose_cancel, .choose_quit, .activate_choice => return ctx.consumeEvent(),
                     else => try self.dispatchKeyAction(ctx, action),
                 }
                 ctx.consumeAndRedraw();
@@ -232,9 +239,13 @@ const View = struct {
     }
 
     fn handleDialog(self: *View, ctx: *vxfw.EventContext, value: vxfw.Event) !void {
+        defer if (!self.dialog) self.bindings.cancel();
         switch (value) {
             .key_press => |key| {
-                const action = self.bindings.resolve(&.{.dialog}, shared.vaxisMatcher(key)) orelse return ctx.consumeEvent();
+                const action = switch (self.bindings.receive(&.{.dialog}, shared.libvaxisMatcher(key))) {
+                    .action => |action| action,
+                    .pending, .none => return ctx.consumeEvent(),
+                };
                 switch (action) {
                     .cancel => self.dialog = false,
                     .confirm => {
@@ -247,7 +258,7 @@ const View = struct {
                         self.dialog = false;
                         if (self.dialog_choice == .quit) return self.quit(ctx);
                     },
-                    else => unreachable,
+                    else => return ctx.consumeEvent(),
                 }
                 ctx.consumeAndRedraw();
             },
@@ -270,6 +281,9 @@ const View = struct {
 
     fn handleMouse(self: *View, ctx: *vxfw.EventContext, value: vaxis.Mouse) !void {
         if (self.width < 32 or self.height < 8) return;
+        // Global bindings remain active in both panes, so a focus change must discard their pending input.
+        const previous_focus = self.focus;
+        defer if (self.focus != previous_focus) self.bindings.cancel();
         // Drag events need temporary row data without retaining it for the viewer's lifetime.
         var memory = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer memory.deinit();

@@ -2,9 +2,9 @@
 
 Lantana is pre-1.0 software. Its API and command behavior may change between releases.
 
-1. Open an issue to describe the problem or proposed change. Discuss the approach before starting a pull request.
+1. Open an issue describing the problem or proposed change. Discuss the approach before starting a pull request.
 2. Fork the repository and make the change. Keep application-specific behavior out of the Zig library.
-3. Open a pull request that links the issue with `Closes #NNN`. Complete the pull request template and include the commands you ran.
+3. Link the issue with `Closes #NNN` in your pull request. Complete the template and include the commands you ran.
 
 ## Language
 
@@ -20,15 +20,20 @@ zig build test
 zig build check
 ```
 
-Git pager behavior is covered by terminal tests that use real Git and a PTY or ConPTY.
+Terminal tests check Git pager behavior with real Git and a PTY or ConPTY.
 
 ## Releases
 
-GitHub Releases contain the native `lantana` executables and generated release notes. Maintainers run the Release workflow from `main` with an `X.Y.Z` version. Configure `APP_CLIENT_ID` and `APP_PRIVATE_KEY` as repository secrets. The GitHub App needs Contents write access to Lantana, homebrew-tap, and scoop-bucket.
+GitHub Releases contain native `lantana` executables and generated release notes.
+Maintainers run the Release workflow from `main` with an `X.Y.Z` version.
+Set repository secrets `APP_CLIENT_ID` and `APP_PRIVATE_KEY`.
+The GitHub App needs Contents write access to Lantana, homebrew-tap, and scoop-bucket.
 
-The package tool generates the Homebrew formula and Scoop manifest from the release version and ZIP checksums. Lantana does not store package templates.
+The package tool generates the Homebrew formula and Scoop manifest from the release version and ZIP checksums.
+Lantana does not store package templates.
 Run `zig build release` to build all six archives and generate `lantana.rb`, `lantana.json`, and `SHA256SUMS`.
-Run `zig build packages -- dist` to regenerate package files from downloaded release archives. Existing checksums are verified before generation.
+Run `zig build packages -- dist` to regenerate package files from downloaded release archives.
+The tool verifies existing checksums before generating files.
 The Release workflow publishes the generated formula to `hashiiiii/homebrew-tap` and the Scoop manifest to `hashiiiii/scoop-bucket`.
 
 ## License

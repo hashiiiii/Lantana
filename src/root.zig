@@ -7,7 +7,7 @@ pub const raw_split = @import("raw_split.zig");
 pub const review = @import("review.zig");
 pub const document = @import("document.zig");
 pub const keymap = @import("keymap.zig");
-pub const Keymap = keymap.Bindings;
+pub const Bindings = keymap.Bindings;
 
 pub const Color = tui.Color;
 pub const Theme = tui.Theme;
@@ -24,10 +24,11 @@ pub const Options = struct {
     theme: Theme = .{},
     renderer: ?DocumentRenderer = null,
     file_text: ?FileTextProvider = null,
-    keymap: ?*const Keymap = null,
+    /// The caller owns these bindings. Each terminal session clears pending input when it starts and ends.
+    bindings: ?*Bindings = null,
 };
 
-/// The caller retains ownership of the captured patch and handles a terminal error.
+/// The caller owns the captured patch and handles terminal errors.
 pub fn run(allocator: std.mem.Allocator, patch: []const u8, options: Options) !void {
     if (patch.len == 0) return;
     var memory = std.heap.ArenaAllocator.init(allocator);
@@ -35,10 +36,10 @@ pub fn run(allocator: std.mem.Allocator, patch: []const u8, options: Options) !v
     const arena = memory.allocator();
     const parsed = try git_patch.parse(arena, patch);
     var state = try review.Review.initWithFileText(arena, parsed, options.renderer, options.file_text);
-    var owned: ?Keymap = null;
+    var owned: ?Bindings = null;
     defer if (owned) |*bindings| bindings.deinit();
-    const bindings = options.keymap orelse blk: {
-        owned = try keymap.defaults(arena);
+    const bindings = options.bindings orelse blk: {
+        owned = try keymap.loadDefaults(arena);
         break :blk &owned.?;
     };
     try tui.run(options.io, arena, options.environ, &state, options.theme, bindings);
