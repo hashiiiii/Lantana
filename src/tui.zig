@@ -26,7 +26,8 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, environ: *std.process.Envir
     var buffer: [4096]u8 = undefined;
     var session = try terminal.Session.init(io, allocator, environ, &buffer);
     defer session.deinit();
-    var view: View = .{ .state = state, .theme = theme, .session = &session, .bindings = bindings };
+    var view: View = .{ .allocator = allocator, .state = state, .theme = theme, .session = &session, .bindings = bindings };
+    defer if (view.raw_display) |*display| display.memory.deinit();
     try session.app.run(view.widget(), .{});
 }
 
@@ -38,7 +39,7 @@ const stats_row: u16 = 1;
 const body_top: u16 = stats_row + 1;
 const min_tree_content: u16 = 10;
 const min_diff_content: u16 = 14;
-// A raw side needs five cells for its line-number gutter and one for source text.
+// Four-digit line numbers need five gutter cells and one source cell.
 const min_raw_side: u16 = 6;
 const SelectionSource = enum { before, after, fallback, document };
 const ContentSelection = struct {
@@ -64,7 +65,77 @@ const Layout = struct {
     after_width: u16,
 };
 
+const DisplaySide = struct {
+    number: usize,
+    source: []const u8,
+    text: DisplayText,
+
+    fn init(arena: std.mem.Allocator, side: raw_split.Side) !DisplaySide {
+        const source = try safeDisplay(arena, side.text);
+        const text = if (side.no_newline)
+            try std.fmt.allocPrint(arena, "{s}{s}[no newline]", .{ source, if (source.len == 0) "" else " " })
+        else
+            source;
+        return .{ .number = side.number, .source = source, .text = DisplayText.initSafe(text) };
+    }
+};
+
+const DisplayRow = struct {
+    row: raw_split.PairRow,
+    before: ?DisplaySide,
+    after: ?DisplaySide,
+};
+
+const RawDisplay = struct {
+    memory: std.heap.ArenaAllocator,
+    file_index: usize,
+    revision: usize,
+    rows: []const DisplayRow,
+    before_lines: []const ?[]const u8,
+    after_lines: []const ?[]const u8,
+    gutter: u16,
+    before_columns: usize,
+    after_columns: usize,
+
+    fn init(allocator: std.mem.Allocator, file_index: usize, revision: usize, raw_rows: []raw_split.PairRow) !RawDisplay {
+        var memory = std.heap.ArenaAllocator.init(allocator);
+        errdefer memory.deinit();
+        const arena = memory.allocator();
+        const visible = try raw_split.visibleRows(arena, raw_rows);
+        const rows = try arena.alloc(DisplayRow, visible.len);
+        const before_lines = try arena.alloc(?[]const u8, visible.len);
+        const after_lines = try arena.alloc(?[]const u8, visible.len);
+        var before_columns: usize = 0;
+        var after_columns: usize = 0;
+        for (visible, 0..) |row, index| {
+            const before = if (row.before) |side| try DisplaySide.init(arena, side) else null;
+            const after = if (row.after) |side| try DisplaySide.init(arena, side) else null;
+            rows[index] = .{ .row = row, .before = before, .after = after };
+            before_lines[index] = if (before) |side| side.source else null;
+            after_lines[index] = if (after) |side| side.source else null;
+            if (before) |side| before_columns = @max(before_columns, side.text.columns);
+            if (after) |side| after_columns = @max(after_columns, side.text.columns);
+        }
+        return .{
+            .memory = memory,
+            .file_index = file_index,
+            .revision = revision,
+            .rows = rows,
+            .before_lines = before_lines,
+            .after_lines = after_lines,
+            .gutter = rawGutterWidth(raw_rows),
+            .before_columns = before_columns,
+            .after_columns = after_columns,
+        };
+    }
+
+    fn isFallback(self: *const RawDisplay) bool {
+        return self.rows.len == 0 or self.rows[0].row.kind == .fallback;
+    }
+};
+
 const View = struct {
+    allocator: std.mem.Allocator,
     state: *review.Review,
     theme: Theme,
     session: *terminal.Session,
@@ -84,12 +155,40 @@ const View = struct {
     selection: ?ContentSelection = null,
     width: u16 = 80,
     height: u16 = 24,
+    raw_display: ?RawDisplay = null,
+
+    fn prepareRaw(self: *View) std.mem.Allocator.Error!?*RawDisplay {
+        const state = self.state.currentState() orelse return null;
+        const index = self.state.selected.?;
+        if (self.raw_display) |*display| {
+            if (display.file_index == index and display.revision == state.raw_revision) return display;
+        }
+        const rows = self.state.currentRows() catch return error.OutOfMemory;
+        // Source text is immutable during a session; only file changes and fold toggles rebuild display data.
+        const display = try RawDisplay.init(self.allocator, index, state.raw_revision, rows);
+        if (self.raw_display) |*previous| previous.memory.deinit();
+        self.raw_display = display;
+        return &self.raw_display.?;
+    }
+
+    fn rawGutter(self: *const View) u16 {
+        if (self.raw_display) |display| {
+            if (self.state.selected == display.file_index) return display.gutter;
+        }
+        return min_raw_side - 1;
+    }
+
+    fn minimumRawSide(self: *const View) u16 {
+        return @min(self.rawGutter() + 1, (self.width - min_tree_content - 4) / 2);
+    }
 
     fn layout(self: *const View) Layout {
-        const outer = std.math.clamp(self.outer_divider orelse treeWidth(self.width) + 1, min_tree_content + 1, self.width - min_diff_content - 2);
+        const min_side = self.minimumRawSide();
+        const min_diff = @max(min_diff_content, min_side * 2 + 1);
+        const outer = std.math.clamp(self.outer_divider orelse treeWidth(self.width) + 1, min_tree_content + 1, self.width - min_diff - 2);
         const right_start = outer + 1;
         const right_width = self.width - right_start - 1;
-        const before_width = std.math.clamp(self.inner_width orelse right_width / 2, min_raw_side, right_width - min_raw_side - 1);
+        const before_width = std.math.clamp(self.inner_width orelse right_width / 2, min_side, right_width - min_side - 1);
         const inner = right_start + before_width;
         return .{
             .outer = outer,
@@ -104,9 +203,11 @@ const View = struct {
 
     fn resizeDivider(self: *View, divider: Divider, column: usize) void {
         const layout_now = self.layout();
+        const min_side = self.minimumRawSide();
+        const min_diff = @max(min_diff_content, min_side * 2 + 1);
         switch (divider) {
-            .outer => self.outer_divider = @intCast(std.math.clamp(column, min_tree_content + 1, @as(usize, self.width - min_diff_content - 2))),
-            .inner => self.inner_width = @intCast(std.math.clamp(column -| layout_now.right_start, min_raw_side, @as(usize, layout_now.right_width - min_raw_side - 1))),
+            .outer => self.outer_divider = @intCast(std.math.clamp(column, min_tree_content + 1, @as(usize, self.width - min_diff - 2))),
+            .inner => self.inner_width = @intCast(std.math.clamp(column -| layout_now.right_start, min_side, @as(usize, layout_now.right_width - min_side - 1))),
         }
     }
 
@@ -303,8 +404,8 @@ const View = struct {
                 } else if (x == geometry.inner and value.row >= body_top and !self.onHorizontalScrollbar(value)) {
                     if (self.state.currentState()) |state| {
                         if (state.mode == .raw) {
-                            const rows = try self.state.visibleRows(arena);
-                            if (rows.len != 0 and rows[0].kind != .fallback) self.divider_dragging = .inner;
+                            const display = (try self.prepareRaw()) orelse return;
+                            if (!display.isFallback()) self.divider_dragging = .inner;
                         }
                     }
                 }
@@ -392,7 +493,7 @@ const View = struct {
                         return;
                     }
                 }
-                if (try self.selectionSourceAt(arena, x)) |source| {
+                if (try self.selectionSourceAt(x)) |source| {
                     if (try self.selectionHit(arena, source, x, y, false)) |point| {
                         self.selection = .{ .source = source, .origin = point, .target = point };
                     }
@@ -409,13 +510,13 @@ const View = struct {
         return x >= self.layout().right_start and x < self.width - 1 and y == self.height - 2;
     }
 
-    fn selectionSourceAt(self: *View, arena: std.mem.Allocator, x: usize) !?SelectionSource {
+    fn selectionSourceAt(self: *View, x: usize) !?SelectionSource {
         const state = self.state.currentState() orelse return null;
         const source: SelectionSource = if (state.mode == .document and state.document != null)
             .document
         else blk: {
-            const rows = try self.state.visibleRows(arena);
-            if (rows.len == 0 or rows[0].kind == .fallback) break :blk .fallback;
+            const display = (try self.prepareRaw()) orelse return null;
+            if (display.isFallback()) break :blk .fallback;
             const after = self.selectionArea(.after) orelse return null;
             break :blk if (x >= after.x) .after else .before;
         };
@@ -429,11 +530,12 @@ const View = struct {
         const state = self.state.currentState() orelse return null;
         const geometry = self.layout();
         const raw = state.raw_scroll;
+        const gutter = self.rawGutter();
         return switch (source) {
             .document => .{ .x = geometry.right_start, .width = geometry.right_width, .vertical = state.document_scroll.vertical, .horizontal = state.document_scroll.horizontal },
             .fallback => .{ .x = geometry.right_start, .width = geometry.right_width, .vertical = raw.vertical, .horizontal = raw.horizontal },
-            .before => .{ .x = geometry.right_start + 5, .width = geometry.before_width -| 5, .vertical = raw.vertical, .horizontal = raw.horizontal },
-            .after => .{ .x = geometry.after_start + 5, .width = geometry.after_width -| 5, .vertical = raw.vertical, .horizontal = raw.horizontal },
+            .before => .{ .x = geometry.right_start + gutter, .width = geometry.before_width -| gutter, .vertical = raw.vertical, .horizontal = raw.horizontal },
+            .after => .{ .x = geometry.after_start + gutter, .width = geometry.after_width -| gutter, .vertical = raw.vertical, .horizontal = raw.horizontal },
         };
     }
 
@@ -455,22 +557,13 @@ const View = struct {
             return lines;
         }
         if (state.mode != .raw) return null;
-        const rows = self.state.visibleRows(arena) catch |err| switch (err) {
-            error.NoSelectedFile => return null,
-            else => return error.OutOfMemory,
+        const display = (try self.prepareRaw()) orelse return null;
+        if ((source == .fallback) != display.isFallback()) return null;
+        return switch (source) {
+            .before, .fallback => display.before_lines,
+            .after => display.after_lines,
+            .document => unreachable,
         };
-        const is_fallback = rows.len == 0 or rows[0].kind == .fallback;
-        if ((source == .fallback) != is_fallback) return null;
-        const lines = try arena.alloc(?[]const u8, rows.len);
-        for (rows, 0..) |row, index| {
-            const side = switch (source) {
-                .before, .fallback => row.before,
-                .after => row.after,
-                .document => unreachable,
-            };
-            lines[index] = if (side) |value| try safeDisplay(arena, value.text) else null;
-        }
-        return lines;
     }
 
     fn selectionHit(self: *View, arena: std.mem.Allocator, source: SelectionSource, x: usize, y: usize, clamp: bool) !?text_selection.Cell {
@@ -520,6 +613,10 @@ const View = struct {
             try putText(ctx.arena, surface, 1, @min(size.height -| 1, 2), size.width -| 2, 0, "Terminal too small", .{ .fg = rgb(self.theme.accent) });
             return surface;
         }
+        // A newly selected file can need a wider gutter before its first frame.
+        if (self.state.currentState()) |state| {
+            if (state.mode == .raw) _ = try self.prepareRaw();
+        }
         // Resizing a pane or selecting another file can shrink the valid horizontal range.
         try self.clampHorizontalScroll(ctx.arena);
         const geometry = self.layout();
@@ -568,10 +665,8 @@ const View = struct {
             };
             return parsed.lines.len;
         }
-        return (self.state.visibleRows(arena) catch |err| switch (err) {
-            error.NoSelectedFile => return 0,
-            else => return error.OutOfMemory,
-        }).len;
+        const display = (try self.prepareRaw()) orelse return 0;
+        return display.rows.len;
     }
 
     fn revealScrollbar(self: *View, ctx: *vxfw.EventContext, axis: ScrollbarAxis) !void {
@@ -630,36 +725,13 @@ const View = struct {
             }
             return .{ .viewport = right_width, .max_offset = longest -| right_width };
         }
-        const rows = self.state.visibleRows(arena) catch |err| switch (err) {
-            error.NoSelectedFile => return .{ .viewport = 0, .max_offset = 0 },
-            else => return error.OutOfMemory,
-        };
-        const fallback = rows.len == 0 or rows[0].kind == .fallback;
-        if (fallback) {
-            var longest: usize = 0;
-            for (rows) |row| {
-                if (row.before) |side| longest = @max(longest, text_selection.width(try safeDisplay(arena, side.text)));
-            }
-            return .{ .viewport = right_width, .max_offset = longest -| right_width };
-        }
-        const before_viewport: usize = geometry.before_width -| 5;
-        const after_viewport: usize = geometry.after_width -| 5;
-        var before_longest: usize = 0;
-        var after_longest: usize = 0;
-        for (rows) |row| {
-            if (row.before) |side| {
-                var width = text_selection.width(try safeDisplay(arena, side.text));
-                if (side.no_newline) width += "[no newline]".len + @intFromBool(side.text.len != 0);
-                before_longest = @max(before_longest, width);
-            }
-            if (row.after) |side| {
-                var width = text_selection.width(try safeDisplay(arena, side.text));
-                if (side.no_newline) width += "[no newline]".len + @intFromBool(side.text.len != 0);
-                after_longest = @max(after_longest, width);
-            }
-        }
-        const before_offset = before_longest -| before_viewport;
-        const after_offset = after_longest -| after_viewport;
+        const display = (try self.prepareRaw()) orelse return .{ .viewport = 0, .max_offset = 0 };
+        if (display.isFallback()) return .{ .viewport = right_width, .max_offset = display.before_columns -| right_width };
+        const gutter = display.gutter;
+        const before_viewport: usize = geometry.before_width -| gutter;
+        const after_viewport: usize = geometry.after_width -| gutter;
+        const before_offset = if (before_viewport == 0) 0 else display.before_columns -| before_viewport;
+        const after_offset = if (after_viewport == 0) 0 else display.after_columns -| after_viewport;
         return if (before_offset >= after_offset)
             .{ .viewport = before_viewport, .max_offset = before_offset }
         else
@@ -811,16 +883,14 @@ const View = struct {
             }
             return;
         }
-        const rows = self.state.visibleRows(arena) catch |err| switch (err) {
-            error.NoSelectedFile => return,
-            else => return error.OutOfMemory,
-        };
+        const display = (try self.prepareRaw()) orelse return;
+        const rows = display.rows;
         state.raw_scroll.vertical = @min(state.raw_scroll.vertical, rows.len -| viewport);
-        const fallback = rows.len == 0 or rows[0].kind == .fallback;
-        if (fallback) {
-            for (rows, 0..) |row, index| {
-                if (index < state.raw_scroll.vertical or index >= state.raw_scroll.vertical + viewport) continue;
-                if (row.before) |side| try putText(arena, surface, x, @intCast(index - state.raw_scroll.vertical + body_top), width, state.raw_scroll.horizontal, side.text, foreground);
+        const start = state.raw_scroll.vertical;
+        const visible = rows[start..@min(rows.len, start + viewport)];
+        if (display.isFallback()) {
+            for (visible, 0..) |row, index| {
+                if (row.before) |side| side.text.draw(surface, x, @intCast(index + body_top), width, state.raw_scroll.horizontal, foreground);
             }
             return;
         }
@@ -828,10 +898,11 @@ const View = struct {
             .{ .fg = rgb(self.theme.background), .bg = rgb(self.theme.accent), .bold = true }
         else
             accent;
+        const gutter = display.gutter;
         for (body_top..self.height - 1) |screen_row| try putText(arena, surface, geometry.inner, @intCast(screen_row), 1, 0, "│", divider_style);
-        for (rows, 0..) |row, index| {
-            if (index < state.raw_scroll.vertical or index >= state.raw_scroll.vertical + viewport) continue;
-            const y: u16 = @intCast(index - state.raw_scroll.vertical + body_top);
+        for (visible, 0..) |prepared, index| {
+            const row = prepared.row;
+            const y: u16 = @intCast(index + body_top);
             if (row.kind == .fold) {
                 const style: vaxis.Style = .{ .fg = rgb(self.theme.accent), .bg = .{ .rgb = .{ 36, 35, 48 } } };
                 fill(surface, x, y, width, style);
@@ -845,8 +916,8 @@ const View = struct {
             }
             const before_style: vaxis.Style = if (row.kind == .change) .{ .fg = rgb(self.theme.foreground), .bg = rgb(mix(self.theme.background, self.theme.removed)) } else foreground;
             const after_style: vaxis.Style = if (row.kind == .change) .{ .fg = rgb(self.theme.foreground), .bg = rgb(mix(self.theme.background, self.theme.added)) } else foreground;
-            drawSide(arena, surface, x, y, geometry.before_width, state.raw_scroll.horizontal, row.before, before_style) catch return error.OutOfMemory;
-            drawSide(arena, surface, geometry.after_start, y, geometry.after_width, state.raw_scroll.horizontal, row.after, after_style) catch return error.OutOfMemory;
+            try drawSide(arena, surface, x, y, geometry.before_width, gutter, state.raw_scroll.horizontal, prepared.before, before_style);
+            try drawSide(arena, surface, geometry.after_start, y, geometry.after_width, gutter, state.raw_scroll.horizontal, prepared.after, after_style);
         }
     }
 
@@ -949,40 +1020,97 @@ fn fill(surface: vxfw.Surface, x: u16, y: u16, width: u16, style: vaxis.Style) v
     for (0..width) |column| surface.writeCell(x + @as(u16, @intCast(column)), y, .{ .char = .{ .grapheme = " ", .width = 1 }, .style = style });
 }
 
-fn putText(arena: std.mem.Allocator, surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, value: []const u8, style: vaxis.Style) std.mem.Allocator.Error!void {
-    if (width == 0) return;
-    const safe = try safeDisplay(arena, value);
-    var graphemes = vaxis.unicode.graphemeIterator(safe);
-    var logical: usize = 0;
-    while (graphemes.next()) |grapheme| {
-        const bytes = grapheme.bytes(safe);
-        if (std.mem.eql(u8, bytes, "\t")) {
-            const advance = 4 - logical % 4;
-            for (0..advance) |column| {
-                const position = logical + column;
-                if (position < offset or position - offset >= width) continue;
-                surface.writeCell(x + @as(u16, @intCast(position - offset)), y, .{
-                    .char = .{ .grapheme = if (column == 0) "→" else " ", .width = 1 },
+const DisplayText = struct {
+    bytes: []const u8,
+    columns: usize,
+    ascii: bool,
+    tabs: bool,
+
+    fn init(arena: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error!DisplayText {
+        return initSafe(try safeDisplay(arena, value));
+    }
+
+    fn initSafe(bytes: []const u8) DisplayText {
+        var columns: usize = 0;
+        var ascii = true;
+        var tabs = false;
+        for (bytes) |byte| {
+            ascii = ascii and byte < 0x80;
+            if (byte == '\t') {
+                tabs = true;
+                columns += 4 - columns % 4;
+            } else columns += 1;
+        }
+        return .{ .bytes = bytes, .columns = if (ascii) columns else text_selection.width(bytes), .ascii = ascii, .tabs = tabs };
+    }
+
+    fn draw(self: DisplayText, surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, style: vaxis.Style) void {
+        if (width == 0 or offset >= self.columns) return;
+        // ASCII without tabs has one cell per byte, so panning can skip the offscreen prefix directly.
+        if (self.ascii and !self.tabs) {
+            const end = @min(self.bytes.len, offset + width);
+            for (offset..end) |index| {
+                surface.writeCell(x + @as(u16, @intCast(index - offset)), y, .{
+                    .char = .{ .grapheme = self.bytes[index .. index + 1], .width = 1 },
                     .style = style,
                 });
             }
-            logical += advance;
-            continue;
+            return;
         }
-        const cells = vaxis.gwidth.gwidth(bytes, .unicode);
-        if (logical + cells <= offset) {
+        var logical: usize = 0;
+        if (self.ascii) {
+            for (self.bytes, 0..) |byte, index| {
+                if (logical >= offset + width) break;
+                if (byte == '\t') {
+                    drawTab(surface, x, y, width, offset, logical, style);
+                    logical += 4 - logical % 4;
+                } else {
+                    if (logical >= offset) surface.writeCell(x + @as(u16, @intCast(logical - offset)), y, .{
+                        .char = .{ .grapheme = self.bytes[index .. index + 1], .width = 1 },
+                        .style = style,
+                    });
+                    logical += 1;
+                }
+            }
+            return;
+        }
+        var graphemes = vaxis.unicode.graphemeIterator(self.bytes);
+        while (graphemes.next()) |grapheme| {
+            if (logical >= offset + width) break;
+            const bytes = grapheme.bytes(self.bytes);
+            if (std.mem.eql(u8, bytes, "\t")) {
+                drawTab(surface, x, y, width, offset, logical, style);
+                logical += 4 - logical % 4;
+                continue;
+            }
+            const cells = vaxis.gwidth.gwidth(bytes, .unicode);
+            if (logical < offset) {
+                logical += cells;
+                continue;
+            }
+            const visible = logical - offset;
+            if (visible + cells > width) break;
+            surface.writeCell(x + @as(u16, @intCast(visible)), y, .{ .char = .{ .grapheme = bytes, .width = @intCast(cells) }, .style = style });
             logical += cells;
-            continue;
         }
-        if (logical < offset) {
-            logical += cells;
-            continue;
-        }
-        const visible = logical - offset;
-        if (visible + cells > width) break;
-        surface.writeCell(x + @as(u16, @intCast(visible)), y, .{ .char = .{ .grapheme = bytes, .width = @intCast(cells) }, .style = style });
-        logical += cells;
     }
+};
+
+fn drawTab(surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, logical: usize, style: vaxis.Style) void {
+    for (0..4 - logical % 4) |column| {
+        const position = logical + column;
+        if (position < offset or position - offset >= width) continue;
+        surface.writeCell(x + @as(u16, @intCast(position - offset)), y, .{
+            .char = .{ .grapheme = if (column == 0) "→" else " ", .width = 1 },
+            .style = style,
+        });
+    }
+}
+
+fn putText(arena: std.mem.Allocator, surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, value: []const u8, style: vaxis.Style) std.mem.Allocator.Error!void {
+    if (width == 0) return;
+    const text = try DisplayText.init(arena, value);
+    text.draw(surface, x, y, width, offset, style);
 }
 
 fn safeDisplay(arena: std.mem.Allocator, value: []const u8) std.mem.Allocator.Error![]const u8 {
@@ -1014,19 +1142,33 @@ fn safeDisplay(arena: std.mem.Allocator, value: []const u8) std.mem.Allocator.Er
     return output.toOwnedSlice(arena);
 }
 
-fn drawSide(arena: std.mem.Allocator, surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, side: ?raw_split.Side, style: vaxis.Style) !void {
+fn rawGutterWidth(rows: []const raw_split.PairRow) u16 {
+    var maximum: usize = 0;
+    for (rows) |row| {
+        if (row.before) |side| maximum = @max(maximum, side.number);
+        if (row.after) |side| maximum = @max(maximum, side.number);
+        if (row.hidden.len != 0) {
+            const last = row.hidden[row.hidden.len - 1];
+            if (last.before) |side| maximum = @max(maximum, side.number);
+            if (last.after) |side| maximum = @max(maximum, side.number);
+        }
+    }
+    var digits: u16 = 1;
+    while (maximum >= 10) : (maximum /= 10) digits += 1;
+    return @max(4, digits) + 1;
+}
+
+fn drawSide(arena: std.mem.Allocator, surface: vxfw.Surface, x: u16, y: u16, width: u16, gutter_width: u16, offset: usize, side: ?DisplaySide, style: vaxis.Style) !void {
     const content = side orelse return;
     const gutter: vaxis.Style = .{ .fg = style.fg, .dim = true };
     const number = try std.fmt.allocPrint(arena, "{d: >4}", .{content.number});
-    try putText(arena, surface, x, y, @min(width, 4), 0, number, gutter);
-    if (width > 4) try putText(arena, surface, x + 4, y, 1, 0, "│", gutter);
-    if (width <= 5) return;
-    if (style.bg != .default) fill(surface, x + 5, y, width - 5, style);
-    const value = if (content.no_newline)
-        try std.fmt.allocPrint(arena, "{s}{s}[no newline]", .{ content.text, if (content.text.len == 0) "" else " " })
-    else
-        content.text;
-    try putText(arena, surface, x + 5, y, width - 5, offset, value, style);
+    const number_width = gutter_width - 1;
+    const padding = number_width -| @as(u16, @intCast(number.len));
+    try putText(arena, surface, x + padding, y, @min(width -| padding, number_width), 0, number, gutter);
+    if (width > number_width) try putText(arena, surface, x + number_width, y, 1, 0, "│", gutter);
+    if (width <= gutter_width) return;
+    if (style.bg != .default) fill(surface, x + gutter_width, y, width - gutter_width, style);
+    content.text.draw(surface, x + gutter_width, y, width - gutter_width, offset, style);
 }
 
 fn drawStyledLine(surface: vxfw.Surface, x: u16, y: u16, width: u16, offset: usize, line: document.Line, theme: Theme) void {
@@ -1070,7 +1212,8 @@ test "changed source highlights stop at the line-number separator" {
     defer memory.deinit();
     const arena = memory.allocator();
     const surface = try vxfw.Surface.init(arena, undefined, .{ .width = 16, .height = 1 });
-    try drawSide(arena, surface, 0, 0, 16, 0, .{ .number = 7, .text = "changed" }, .{
+    const side = try DisplaySide.init(arena, .{ .number = 7, .text = "changed" });
+    try drawSide(arena, surface, 0, 0, 16, 5, 0, side, .{
         .fg = .{ .rgb = .{ 220, 220, 224 } },
         .bg = .{ .rgb = .{ 40, 30, 30 } },
     });
@@ -1080,4 +1223,31 @@ test "changed source highlights stop at the line-number separator" {
     try std.testing.expectEqualStrings("│", surface.readCell(4, 0).char.grapheme);
     try std.testing.expect(surface.readCell(4, 0).style.bg == .default);
     try std.testing.expect(surface.readCell(5, 0).style.bg != .default);
+}
+
+test "source clipping preserves tab stops and whole Unicode graphemes" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    const surface = try vxfw.Surface.init(arena, undefined, .{ .width = 5, .height = 4 });
+
+    // Prepared source text must keep the same cell positions when a pane starts inside a tab or wide glyph.
+    const plain = try DisplayText.init(arena, "0123456789");
+    plain.draw(surface, 0, 0, 5, 4, .{});
+    const tabs = try DisplayText.init(arena, "ab\tcd\tEF");
+    tabs.draw(surface, 0, 1, 5, 3, .{});
+    const unicode = try DisplayText.init(arena, "a界e\u{301}z");
+    unicode.draw(surface, 0, 2, 3, 2, .{});
+    const unsafe = try DisplayText.init(arena, "x\x1b\xffy");
+    unsafe.draw(surface, 0, 3, 4, 0, .{});
+
+    for ([_][]const u8{ "4", "5", "6", "7", "8" }, 0..) |glyph, column|
+        try std.testing.expectEqualStrings(glyph, surface.readCell(@intCast(column), 0).char.grapheme);
+    for ([_][]const u8{ " ", "c", "d", "→", " " }, 0..) |glyph, column|
+        try std.testing.expectEqualStrings(glyph, surface.readCell(@intCast(column), 1).char.grapheme);
+    try std.testing.expect(surface.readCell(0, 2).default);
+    try std.testing.expectEqualStrings("e\u{301}", surface.readCell(1, 2).char.grapheme);
+    try std.testing.expectEqualStrings("z", surface.readCell(2, 2).char.grapheme);
+    for ([_][]const u8{ "x", "�", "�", "y" }, 0..) |glyph, column|
+        try std.testing.expectEqualStrings(glyph, surface.readCell(@intCast(column), 3).char.grapheme);
 }
