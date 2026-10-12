@@ -2,6 +2,7 @@ const std = @import("std");
 const lantana = @import("lantana");
 const git_config = @import("git_config.zig");
 const version = @import("build_options").version;
+const renderer_plugin = @import("renderer.zig");
 const GitContext = @import("git_context.zig").GitContext;
 
 const max_patch_bytes = 32 * 1024 * 1024;
@@ -93,10 +94,16 @@ pub fn run(init: std.process.Init, renderer: ?lantana.DocumentRenderer) !u8 {
     };
     defer bindings.deinit();
     var git_context: GitContext = .{ .io = init.io };
+    var plugins = renderer_plugin.Renderer.load(init.io, arena, init.environ_map, &git_context, &stderr.interface) catch {
+        try stderr.interface.flush();
+        try writeOutput(init.io, bytes.items);
+        return 2;
+    };
+    defer plugins.deinit();
     lantana.run(arena, bytes.items, .{
         .io = init.io,
         .environ = init.environ_map,
-        .renderer = renderer,
+        .renderer = renderer orelse .{ .context = &plugins, .render = renderer_plugin.Renderer.render },
         .file_text = .{ .context = &git_context, .load = GitContext.load },
         .bindings = &bindings,
     }) catch |err| {
@@ -115,4 +122,9 @@ fn writeOutput(io: std.Io, message: []const u8) !void {
     var output: std.Io.File.Writer = .init(.stdout(), io, &buffer);
     try output.interface.writeAll(message);
     try output.interface.flush();
+}
+
+test {
+    _ = renderer_plugin;
+    _ = @import("git_context.zig");
 }

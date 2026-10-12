@@ -29,14 +29,18 @@ pub const Session = struct {
     finished: bool = false,
 
     pub fn start(arena: std.mem.Allocator, io: std.Io, repo: *Repo, wide_diff: bool) !Session {
-        return startWithPagination(arena, io, repo, wide_diff, true);
+        return startWithPagination(arena, io, repo, wide_diff, true, false);
     }
 
     pub fn startPlainDiff(arena: std.mem.Allocator, io: std.Io, repo: *Repo) !Session {
-        return startWithPagination(arena, io, repo, false, false);
+        return startWithPagination(arena, io, repo, false, false, false);
     }
 
-    fn startWithPagination(arena: std.mem.Allocator, io: std.Io, repo: *Repo, wide_diff: bool, paginate: bool) !Session {
+    pub fn startStagedDiff(arena: std.mem.Allocator, io: std.Io, repo: *Repo) !Session {
+        return startWithPagination(arena, io, repo, false, false, true);
+    }
+
+    fn startWithPagination(arena: std.mem.Allocator, io: std.Io, repo: *Repo, wide_diff: bool, paginate: bool, staged: bool) !Session {
         var master: c_int = undefined;
         var slave: c_int = undefined;
         if (c.openpty(&master, &slave, null, null, null) != 0) return error.OpenPtyFailed;
@@ -66,7 +70,9 @@ pub const Session = struct {
             _ = c.setenv("TERM", "xterm-256color", 1);
             // User remappings must not affect default-key regression cases.
             _ = c.setenv("XDG_CONFIG_HOME", config_path.ptr, 1);
-            const command = if (wide_diff)
+            const command = if (staged)
+                "before=$(stty -g); git diff --cached; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\""
+            else if (wide_diff)
                 "before=$(stty -g); git --paginate diff --unified=100; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\""
             else if (!paginate)
                 "before=$(stty -g); git diff; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\""
@@ -199,6 +205,9 @@ pub fn bodyRows(frame: []const u8) []const u8 {
 }
 
 pub fn runDetached(arena: std.mem.Allocator, io: std.Io, input: []const u8) !DetachedResult {
+    var config = std.testing.tmpDir(.{});
+    defer config.cleanup();
+    const config_path = try arena.dupeZ(u8, try config.dir.realPathFileAlloc(io, ".", arena));
     var stdin_pipe: [2]c_int = .{ -1, -1 };
     var stdout_pipe: [2]c_int = .{ -1, -1 };
     if (c.pipe(&stdin_pipe) != 0) return error.PipeFailed;
@@ -218,6 +227,8 @@ pub fn runDetached(arena: std.mem.Allocator, io: std.Io, input: []const u8) !Det
     if (child < 0) return error.ForkFailed;
     if (child == 0) {
         _ = c.setsid();
+        // Detached fallback tests must not create first-run files in the developer's configuration.
+        _ = c.setenv("XDG_CONFIG_HOME", config_path.ptr, 1);
         _ = c.close(stdin_pipe[1]);
         _ = c.close(stdout_pipe[0]);
         _ = c.dup2(stdin_pipe[0], 0);

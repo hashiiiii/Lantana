@@ -714,12 +714,9 @@ test "document and raw views support tree navigation, mouse input, and resizing 
     var session = try Session.start(arena, std.testing.io, &repo, true);
     defer session.abort();
 
-    const initial = try session.waitFrame("   1│value 0", 0);
-    try std.testing.expect(std.mem.indexOf(u8, initial, "Document for") == null);
+    const initial = try session.waitFrame("Document for Assets/A.prefab", 0);
     try std.testing.expect(std.mem.indexOf(u8, initial, "Scripts") != null);
     var mark = session.screen.frame;
-    try session.send("m");
-    _ = try session.waitFrame("Document for Assets/A.prefab", mark);
     // Document text must copy without its SGR styles or the surrounding pane.
     try session.drag(.{ .col = 29, .row = 3 }, .{ .col = 36, .row = 3 });
     try session.waitClipboard("Document");
@@ -767,4 +764,53 @@ test "document and raw views support tree navigation, mouse input, and resizing 
     try session.finish();
     try std.testing.expectEqualStrings(status_before, try repo.git(&.{ "status", "--porcelain=v1" }));
     try std.testing.expectEqualStrings(config_before, try repo.read(".git/config"));
+}
+
+test "plain git diff opens a configured external view and keeps raw mode available" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "notes/space 日本語.txt", "before-renderer\n", "after-renderer\n");
+    defer repo.deinit();
+    // A real Git command proves argv expansion without a fake renderer executable.
+    try repo.write(".git/xdg/lantana/renderers.json",
+        \\[{"patterns":["notes/*.txt"],"command":["git","hash-object","{before}","{after}"]}]
+    );
+    const status = try repo.git(&.{ "status", "--porcelain=v1" });
+    const config = try repo.read(".git/config");
+    var session = try Session.startPlainDiff(arena, std.testing.io, &repo);
+    defer session.abort();
+    const document = try session.waitFrame("e54b134d78723b029c3a968a4526f6715e57721b", 0);
+    try std.testing.expect(std.mem.indexOf(u8, document, "56ab913d6909e97bdd76f652f1431a2c49304120") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bodyRows(document), "before-renderer") == null);
+    const mark = session.screen.frame;
+    try session.send("m");
+    _ = try session.waitFrame("before-renderer", mark);
+    try session.finish();
+    try expectUnchanged(&repo, status, config);
+}
+
+test "missing and stalled renderers preserve the original raw view" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Example.txt", "before-renderer\n", "after-renderer\n");
+    defer repo.deinit();
+    try repo.write(".git/xdg/lantana/renderers.json",
+        \\[{"patterns":["*.txt"],"command":["lantana-missing-renderer"]}]
+    );
+    // An optional plugin must not make an ordinary Git diff unusable.
+    var missing = try Session.startPlainDiff(arena, std.testing.io, &repo);
+    defer missing.abort();
+    _ = try missing.waitFrame("before-renderer", 0);
+    try missing.finish();
+    try repo.write(".git/xdg/lantana/renderers.json",
+        \\[{"patterns":["*.txt"],"command":["sleep","5"],"timeout_ms":50}]
+    );
+    const started = std.Io.Clock.now(.awake, std.testing.io);
+    var stalled = try Session.startPlainDiff(arena, std.testing.io, &repo);
+    defer stalled.abort();
+    _ = try stalled.waitFrame("before-renderer", 0);
+    try std.testing.expect(started.durationTo(std.Io.Clock.now(.awake, std.testing.io)).nanoseconds < 4 * std.time.ns_per_s);
+    try stalled.finish();
 }

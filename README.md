@@ -73,6 +73,13 @@ For `--project`, commit `.lantana.gitconfig` and run `lantana set --project` onc
 Select files with Up/Down, press Enter to focus the diff, and Esc to return to the tree.  
 Scroll with Up/Down or `j`/`k`; press `q` to quit.
 
+### Renderer plugins
+
+Configure an external viewer in `renderers.json` to show file-specific views in the content pane.
+For example, PrefabLens renders UnityYAML semantically while other files retain raw diffs. Press `m` to switch views.
+
+See [Renderer plugins](docs/renderers.md) for configuration and the command contract.
+
 ### Keymap
 
 The first time you view a diff, Lantana creates `keymap.json` with the [default bindings](src/keymap.json).  

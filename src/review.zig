@@ -189,6 +189,7 @@ pub const Review = struct {
         switch (document) {
             .text => |text| {
                 state.document = text;
+                state.mode = .document;
             },
             .unavailable => |reason| state.unavailable_reason = reason,
         }
@@ -346,7 +347,7 @@ test "folder navigation preserves each file's view mode and scroll position" {
     const patch = try git_patch.parse(arena, @embedFile("fixtures/ordinary.patch"));
     var view = try Review.init(arena, patch, .{ .render = renderPatchPath });
     try expectEqualStrings("Assets/A.prefab", view.currentFile().?.display_path);
-    try expectEqual(Mode.raw, view.currentState().?.mode);
+    try expectEqual(Mode.document, view.currentState().?.mode);
     try expect(view.states[0].rendered);
     // Rendering the first selected file must not compute another file's document.
     try expect(!view.states[1].rendered);
@@ -358,6 +359,7 @@ test "folder navigation preserves each file's view mode and scroll position" {
     try expectEqualStrings("Assets/A.prefab", view.currentFile().?.display_path);
     try view.moveDown();
 
+    view.toggleMode();
     view.scrollDown(3);
     view.panRight(2);
     view.toggleMode();
@@ -368,7 +370,7 @@ test "folder navigation preserves each file's view mode and scroll position" {
     try view.moveDown();
     try expectEqualStrings("Scripts/A.cs", view.currentFile().?.display_path);
     try expect(view.states[1].rendered);
-    try expectEqual(Mode.raw, view.currentState().?.mode);
+    try expectEqual(Mode.document, view.currentState().?.mode);
     try view.moveUp();
     try expectEqualStrings("Scripts", view.currentNode().?.name);
     try view.moveUp();

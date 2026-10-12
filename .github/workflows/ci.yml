@@ -31,9 +31,14 @@ jobs:
         timeout-minutes: 10
         run: |
           zig build test-bins -j1
+          ./zig-out/bin/cli-unit-test.exe
           ./zig-out/bin/lantana-test.exe
           ./zig-out/bin/terminal-test.exe
           ./zig-out/bin/package-test.exe
+      - name: PrefabLens integration
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: mise exec github:hashiiiii/PrefabLens@v0.10.10 -- zig build test-prefablens
       - name: Check Git fixtures
         if: runner.os == 'macOS'
         run: |

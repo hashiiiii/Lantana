@@ -100,6 +100,10 @@ fn closePseudoConsole(pseudoconsole: c.HPCON, output_read: *c.HANDLE, output_wri
 }
 
 pub fn runConPty(arena: std.mem.Allocator, io: std.Io, repo: *Repo, quit_input: []const u8) !Result {
+    return runConPtyWithExpected(arena, io, repo, quit_input, null);
+}
+
+pub fn runConPtyWithExpected(arena: std.mem.Allocator, io: std.Io, repo: *Repo, quit_input: []const u8, expected: ?[]const u8) !Result {
     var input_read: c.HANDLE = null;
     var input_write: c.HANDLE = null;
     var output_read: c.HANDLE = null;
@@ -215,8 +219,7 @@ pub fn runConPty(arena: std.mem.Allocator, io: std.Io, repo: *Repo, quit_input: 
                 // Both numbered columns must be painted before the test asks the viewer to quit.
                 if (std.mem.indexOf(u8, transcript.items, "\x1b[?1049h") != null and
                     std.mem.indexOf(u8, visible, "Example.cs") != null and
-                    std.mem.indexOf(u8, visible, "   1│before") != null and
-                    std.mem.indexOf(u8, visible, "   1│after") != null)
+                    (if (expected) |text| std.mem.indexOf(u8, visible, text) != null else std.mem.indexOf(u8, visible, "   1│before") != null and std.mem.indexOf(u8, visible, "   1│after") != null))
                 {
                     try writePipe(input_write, quit_input);
                     sent_quit = true;

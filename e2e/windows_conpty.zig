@@ -56,3 +56,24 @@ test "ConPTY loads a quit sequence from keymap.json" {
     try std.testing.expectEqual(@as(u32, 0), result.exit_code);
     try std.testing.expect(result.sent_quit);
 }
+
+test "ConPTY initially displays a real external command view" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try Repo.init(arena, std.testing.io);
+    defer repo.deinit();
+    try repo.setPager(pager_path);
+    try repo.write("Example.cs", "before-renderer\n");
+    try repo.commit();
+    try repo.write("Example.cs", "after-renderer\n");
+    try repo.write(".git/xdg/lantana/renderers.json",
+        \\[{"patterns":["*.cs"],"command":["git","hash-object","{before}","{after}"]}]
+    );
+    // Windows must exercise command launch and document display, not just compile the plugin code.
+    const result = try @import("windows_conpty_support.zig").runConPtyWithExpected(arena, std.testing.io, &repo, "q", "e54b134d78723b029c3a968a4526f6715e57721b");
+    try std.testing.expect(result.sent_quit);
+    try std.testing.expectEqual(@as(u32, 0), result.exit_code);
+    try std.testing.expect(std.mem.indexOf(u8, result.transcript, "56ab913d6909e97bdd76f652f1431a2c49304120") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.transcript, "before-renderer") == null);
+}
