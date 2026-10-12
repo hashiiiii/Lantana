@@ -9,33 +9,3 @@ Lantana is pre-1.0 software. Its API and command behavior may change between rel
 ## Language
 
 Use English for issues, pull requests, documentation, comments, and commit messages. This keeps the project history readable for contributors.
-
-## Development checks
-
-Follow the [development setup](README.md#development). Run these commands before opening a pull request:
-
-```sh
-zig fmt --check build.zig build.zig.zon src e2e tools
-zig build test
-zig build check
-```
-
-Terminal tests check Git pager behavior with real Git and a PTY or ConPTY.
-
-## Releases
-
-GitHub Releases contain native `lantana` executables and generated release notes.
-Maintainers run the Release workflow from `main` with an `X.Y.Z` version.
-Set repository secrets `APP_CLIENT_ID` and `APP_PRIVATE_KEY`.
-The GitHub App needs Contents write access to Lantana, homebrew-tap, and scoop-bucket.
-
-The package tool generates the Homebrew formula and Scoop manifest from the release version and ZIP checksums.
-Lantana does not store package templates.
-Run `zig build release` to build all six archives and generate `lantana.rb`, `lantana.json`, and `SHA256SUMS`.
-Run `zig build packages -- dist` to regenerate package files from downloaded release archives.
-The tool verifies existing checksums before generating files.
-The Release workflow publishes the generated formula to `hashiiiii/homebrew-tap` and the Scoop manifest to `hashiiiii/scoop-bucket`.
-
-## License
-
-By contributing, you agree that your contributions are licensed under the [Apache License 2.0](LICENSE).
