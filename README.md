@@ -7,6 +7,10 @@
 Lantana is a terminal viewer for Git patches, with a file tree and side-by-side diffs.  
 Use `lantana` or embed its Zig module.
 
+<p align="center">
+  <img width="924" src="docs/images/top.png" alt="Lantana showing a file tree and side-by-side Git diffs" />
+</p>
+
 ## Installation
 
 ### Homebrew (macOS / Linux)
