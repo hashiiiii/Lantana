@@ -477,29 +477,50 @@ test "a folded unchanged range reveals real file lines when clicked" {
     try session.finish();
 }
 
-test "the floating scrollbar can jump to the end of a long diff" {
+test "long diffs keep complete line numbers at the scrollbar boundary" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
     var before: std.ArrayList(u8) = .empty;
     var after: std.ArrayList(u8) = .empty;
-    for (0..80) |index| {
-        try before.appendSlice(arena, try std.fmt.allocPrint(arena, "old line {d:0>2}\n", .{index}));
-        try after.appendSlice(arena, try std.fmt.allocPrint(arena, "new line {d:0>2}\n", .{index}));
+    // Five-digit line numbers expose gutter clipping that short diffs cannot catch.
+    for (0..12000) |index| {
+        try before.appendSlice(arena, try std.fmt.allocPrint(arena, "old line {d:0>5}\n", .{index}));
+        try after.appendSlice(arena, try std.fmt.allocPrint(arena, "new line {d:0>5}\n", .{index}));
     }
-    var repo = try changedRepo(arena, "A.cs", before.items, after.items);
+    var repo = try Repo.init(arena, std.testing.io);
     defer repo.deinit();
+    try repo.setPager(pager_path);
+    try repo.write("A.cs", "small before\n");
+    try repo.write("B.cs", before.items);
+    try repo.commit();
+    try repo.write("A.cs", "small after\n");
+    try repo.write("B.cs", after.items);
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
-    _ = try session.waitFrame("new line 00", 0);
+    _ = try session.waitFrame("small after", 0);
+
+    // Switching files must widen a narrow gutter before the new file's first frame.
+    try session.drag(.{ .col = 54, .row = 10 }, .{ .col = 29, .row = 10 });
+    const tree_mark = session.screen.frame;
+    try session.send("\x1b");
+    _ = try session.waitFrame("small after", tree_mark);
+    const first_mark = session.screen.frame;
+    try session.send("j");
+    _ = try session.waitFrame("    1│o│    1│new line 00000", first_mark);
     try session.send("\r\x1b[<65;70;10M");
     const mark = session.screen.frame;
     try session.send("\x1b[<0;79;23M\x1b[<0;79;23m");
-    _ = try session.waitFrame("new line 79", mark);
+    const end = try session.waitFrame("12000│o│12000│new line 11999", mark);
+    // Source selection must start after the enlarged line-number gutter.
+    const source_column = try cellColumn(end, "new line 11999") + 1;
+    try session.drag(.{ .col = source_column, .row = 23 }, .{ .col = source_column + 13, .row = 23 });
+    try session.waitClipboard("new line 11999");
+
     const drag_mark = session.screen.frame;
     // Dragging continues after the pointer leaves the narrow scrollbar column.
     try session.send("\x1b[<0;79;23M\x1b[<32;75;2M\x1b[<0;75;2m");
-    _ = try session.waitFrame("new line 00", drag_mark);
+    _ = try session.waitFrame("new line 00000", drag_mark);
     try session.finish();
 }
 

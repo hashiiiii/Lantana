@@ -41,6 +41,7 @@ pub const FileState = struct {
     document: ?[]const u8 = null,
     unavailable_reason: ?[]const u8 = null,
     raw_rows: ?[]raw_split.PairRow = null,
+    raw_revision: usize = 0,
     raw_scroll: Scroll = .{},
     document_scroll: Scroll = .{},
 };
@@ -218,7 +219,9 @@ pub const Review = struct {
     }
 
     pub fn toggleFold(self: *Review, visible_index: usize) !bool {
-        return raw_split.toggleFold(try self.currentRows(), visible_index);
+        if (!raw_split.toggleFold(try self.currentRows(), visible_index)) return false;
+        self.currentState().?.raw_revision +%= 1;
+        return true;
     }
 
     pub fn toggleMode(self: *Review) void {
