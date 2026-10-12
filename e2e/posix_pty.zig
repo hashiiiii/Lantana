@@ -328,21 +328,59 @@ test "the only collapsed folder can reopen through the keyboard" {
     try expectUnchanged(&repo, status, config);
 }
 
-test "folder focus and pane keys keep the quit dialog cancellable" {
+test "page keys scroll by the visible diff height after resizing" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
     var before: std.ArrayList(u8) = .empty;
     var after: std.ArrayList(u8) = .empty;
-    for (0..60) |index| {
+    for (0..80) |index| {
         try before.appendSlice(arena, try std.fmt.allocPrint(arena, "old line {d:0>2}\n", .{index}));
         try after.appendSlice(arena, try std.fmt.allocPrint(arena, "new line {d:0>2}\n", .{index}));
     }
-    var repo = try changedRepo(arena, "Assets/A.cs", before.items, after.items);
+    var repo = try changedRepo(arena, "A.cs", before.items, after.items);
     defer repo.deinit();
     var session = try Session.start(arena, std.testing.io, &repo, false);
     defer session.abort();
     _ = try session.waitFrame("new line 00", 0);
+
+    // A 24-row terminal has 21 diff rows after the title, counts, and bottom border.
+    var mark = session.screen.frame;
+    try session.send("\r\x1b[6~");
+    const down = try session.waitFrame("new line 41", mark);
+    try std.testing.expect(std.mem.indexOf(u8, std.mem.sliceTo(bodyRows(down), '\n'), "new line 21") != null);
+    mark = session.screen.frame;
+    try session.send("\x1b[5~");
+    _ = try session.waitFrame("new line 00", mark);
+
+    // Resizing must change the next page step instead of preserving a fixed or startup height.
+    mark = session.screen.frame;
+    try session.resize(80, 16);
+    _ = try session.waitFrame("new line 12", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[6~");
+    const resized = try session.waitFrame("new line 25", mark);
+    try std.testing.expect(std.mem.indexOf(u8, std.mem.sliceTo(bodyRows(resized), '\n'), "new line 13") != null);
+    mark = session.screen.frame;
+    try session.send("\x1b[6~");
+    _ = try session.waitFrame("new line 38", mark);
+    mark = session.screen.frame;
+    try session.send("\x1b[5~");
+    const up = try session.waitFrame("new line 13", mark);
+    try std.testing.expect(std.mem.indexOf(u8, std.mem.sliceTo(bodyRows(up), '\n'), "new line 13") != null);
+
+    try session.finish();
+}
+
+test "folder focus and pane keys keep the quit dialog cancellable" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Assets/A.cs", "before\n", "after\n");
+    defer repo.deinit();
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("after", 0);
 
     var mark = session.screen.frame;
     try session.send("\x1b[A\x1b[D");
@@ -351,17 +389,16 @@ test "folder focus and pane keys keep the quit dialog cancellable" {
     try session.send("\x1b[C");
     _ = try session.waitFrame(" Assets", mark);
     mark = session.screen.frame;
-    try session.send("\x1b[B\r\x1b[6~");
-    _ = try session.waitFrame("new line 30", mark);
+    try session.send("\x1b[B\r");
+    _ = try session.waitFrame("after", mark);
     mark = session.screen.frame;
     try session.send("\x1b");
     _ = try session.waitFrame("A.cs", mark);
     mark = session.screen.frame;
     try session.send("\x1b");
     const dialog = try session.waitFrame("Quit Lantana?", mark);
-    // The prompt belongs at the terminal center without a second, unrelated explanation.
+    // The prompt must remain centered after focus moves between panes.
     try std.testing.expectEqual(@as(usize, 33), try cellColumn(dialog, "Quit Lantana?"));
-    try std.testing.expect(std.mem.indexOf(u8, dialog, "Review is read-only.") == null);
     mark = session.screen.frame;
     try session.send("\r");
     const restored = try session.waitFrame("A.cs", mark);

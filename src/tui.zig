@@ -254,6 +254,7 @@ const View = struct {
 
     fn dispatchKeyAction(self: *View, ctx: *vxfw.EventContext, action: keymap.Action) !void {
         if (self.focus == .tree) self.selection = null;
+        const page_rows: usize = if (self.width < 32 or self.height < 8) 0 else self.height -| body_top -| 1;
         switch (action) {
             .move_down => {
                 try self.state.moveDown();
@@ -272,11 +273,11 @@ const View = struct {
             },
             .toggle_folder => try self.toggleSelectedFolder(),
             .scroll_down, .page_down => {
-                self.state.scrollDown(if (action == .page_down) 10 else 1);
+                self.state.scrollDown(if (action == .page_down) page_rows else 1);
                 try self.revealScrollbar(ctx, .vertical);
             },
             .scroll_up, .page_up => {
-                self.state.scrollUp(if (action == .page_up) 10 else 1);
+                self.state.scrollUp(if (action == .page_up) page_rows else 1);
                 try self.revealScrollbar(ctx, .vertical);
             },
             .pan_right => {
