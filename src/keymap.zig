@@ -54,12 +54,9 @@ pub fn loadUser(io: std.Io, allocator: std.mem.Allocator, env: *const std.proces
     if (base.len == 0) return loadDefaults(allocator);
     const path = try std.fs.path.join(allocator, &.{ base, "lantana", "keymap.json" });
     defer allocator.free(path);
-    const text = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
-        error.FileNotFound => return loadDefaults(allocator),
-        else => {
-            try stderr.print("{s}: could not read key bindings ({s})\n", .{ path, @errorName(err) });
-            return error.InvalidKeymap;
-        },
+    const text = readOrCreateUserFile(io, allocator, path) catch |err| {
+        try stderr.print("{s}: could not load key bindings ({s})\n", .{ path, @errorName(err) });
+        return error.InvalidKeymap;
     };
     defer allocator.free(text);
     return switch (try Bindings.load(allocator, text)) {
@@ -74,5 +71,25 @@ pub fn loadUser(io: std.Io, allocator: std.mem.Allocator, env: *const std.proces
             }
             break :blk error.InvalidKeymap;
         },
+    };
+}
+
+fn readOrCreateUserFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => blk: {
+            try createDefaultFile(io, path);
+            break :blk try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
+        },
+        else => return err,
+    };
+}
+
+fn createDefaultFile(io: std.Io, path: []const u8) !void {
+    var file = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .make_path = true });
+    defer file.deinit(io);
+    try file.file.writeStreamingAll(io, default_json);
+    file.link(io) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
     };
 }

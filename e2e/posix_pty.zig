@@ -31,6 +31,58 @@ fn cellColumn(frame: []const u8, needle: []const u8) !usize {
     return error.MissingFrameText;
 }
 
+test "first-run keymap can be edited and survives later sessions" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Example.cs", "before\n", "after\n");
+    defer repo.deinit();
+
+    var first = try Session.start(arena, std.testing.io, &repo, false);
+    defer first.abort();
+    try first.waitFor("before");
+    try first.finish();
+
+    // Installed executables must provide an editable keymap without requiring a source checkout.
+    var json = try std.json.parseFromSlice(std.json.Value, arena, try repo.read(".git/xdg/lantana/keymap.json"), .{});
+    defer json.deinit();
+    const global = json.value.object.getPtr("global") orelse return error.MissingGlobalBindings;
+    const quit = global.object.getPtr("quit") orelse return error.MissingQuitBinding;
+    quit.array.items[0] = .{ .string = "x x" };
+    const edited = try std.json.Stringify.valueAlloc(arena, json.value, .{ .whitespace = .indent_2 });
+    try repo.write(".git/xdg/lantana/keymap.json", edited);
+
+    var second = try Session.start(arena, std.testing.io, &repo, false);
+    defer second.abort();
+    try second.waitFor("before");
+    // Regenerating defaults on startup would lose the remapping and leave this session open.
+    try second.finishAfterInput("xx");
+    try std.testing.expectEqualStrings(edited, try repo.read(".git/xdg/lantana/keymap.json"));
+}
+
+test "interrupted keymap creation leaves no incomplete user configuration" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try changedRepo(arena, "Example.cs", "before\n", "after\n");
+    defer repo.deinit();
+    try repo.write(".git/input.patch", try repo.git(&.{"diff"}));
+    const executable = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, pager_path, arena);
+    const input = try std.fs.path.join(arena, &.{ repo.path, ".git", "input.patch" });
+    var environment = try std.testing.environ.createMap(arena);
+    defer environment.deinit();
+    try environment.put("XDG_CONFIG_HOME", try std.fs.path.join(arena, &.{ repo.path, ".git", "xdg" }));
+
+    // Abrupt termination skips cleanup; an incomplete keymap would prevent later launches.
+    const result = try std.process.run(arena, std.testing.io, .{
+        .argv = &.{ "/bin/sh", "-c", "ulimit -c 0\nulimit -f 0\nexec \"$1\" < \"$2\"", "lantana-test", executable, input },
+        .cwd = .{ .path = repo.path },
+        .environ_map = &environment,
+    });
+    try std.testing.expectEqual(std.process.Child.Term{ .signal = std.posix.SIG.XFSZ }, result.term);
+    try std.testing.expectError(error.FileNotFound, repo.read(".git/xdg/lantana/keymap.json"));
+}
+
 test "JSON configuration leaves omitted and empty actions unbound" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();

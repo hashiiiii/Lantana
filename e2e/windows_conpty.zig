@@ -22,6 +22,13 @@ test "Git pager opens and closes a native ConPTY without changing the repository
     try std.testing.expect(std.mem.indexOf(u8, result.transcript, "after") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.transcript, "\x1b[?1049h") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.transcript, "\x1b[?1049l") != null);
+    // Scoop and manually extracted executables need the same editable first-run configuration.
+    var keymap = try std.json.parseFromSlice(std.json.Value, arena, try repo.read(".git/xdg/lantana/keymap.json"), .{});
+    defer keymap.deinit();
+    try std.testing.expect(keymap.value.object.contains("global"));
+    try std.testing.expect(keymap.value.object.contains("tree"));
+    try std.testing.expect(keymap.value.object.contains("content"));
+    try std.testing.expect(keymap.value.object.contains("dialog"));
     try std.testing.expectEqualStrings(status_before, try repo.git(&.{ "status", "--porcelain=v1" }));
     try std.testing.expectEqualStrings(config_before, try repo.read(".git/config"));
     try std.testing.expectEqualStrings("after\n", try repo.read("Example.cs"));
