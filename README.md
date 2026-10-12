@@ -86,7 +86,26 @@ Edit the file at the path below, then restart Lantana to apply changes:
 | Windows | `%APPDATA%/lantana/keymap.json` |
 | macOS / Linux | `$HOME/.config/lantana/keymap.json` |
 
-See [zig-keymap](https://github.com/hashiiiii/zig-keymap#keys) for details.
+#### Contexts
+
+Place bindings in the context for their UI:
+
+| Context | Active UI |
+| --- | --- |
+| `global` | Either pane, except while the dialog is open |
+| `tree` | Left file tree, when focused |
+| `content` | Right diff pane, when focused |
+| `dialog` | Quit confirmation dialog; all other contexts are inactive |
+
+<p align="center">
+  <img width="924" src="docs/images/tree-content.png" alt="Left tree and right content contexts" />
+</p>
+
+<p align="center">
+  <img width="924" src="docs/images/dialog.png" alt="Quit confirmation dialog context" />
+</p>
+
+See [zig-keymap](https://github.com/hashiiiii/zig-keymap#keys) for key syntax.
 
 ## Development
 
