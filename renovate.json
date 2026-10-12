@@ -1,6 +1,20 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "dependencyDashboard": true,
+  "enabledManagers": ["github-actions", "mise"],
+  "timezone": "Asia/Tokyo",
+  "schedule": ["* * * * 1"],
+  "updateNotScheduled": false,
+  "automerge": false,
+  "minimumReleaseAge": "7 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "internalChecksFilter": "strict",
+  "packageRules": [
+    {
+      "matchManagers": ["mise"],
+      "matchDepNames": ["zig", "zls"],
+      "groupName": "Zig and ZLS",
+      "groupSlug": "zig-and-zls"
+    }
   ]
 }
