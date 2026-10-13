@@ -75,7 +75,11 @@ Scroll with Up/Down or `j`/`k`; press `q` to quit.
 
 ### External renderers
 
-Lantana displays external command output in the content pane. Press `m` to switch between this view and the raw diff.
+<p align="center">
+  <img width="924" src="docs/images/plugin.png" alt="PrefabLens" />
+</p>
+
+Lantana displays external command output in the content pane. Press `Shift+R` to switch between this view and the raw diff.
 If no rule matches, source contents are unavailable, or rendering fails, Lantana shows the raw diff.
 
 The first time you view a diff, Lantana creates `renderers.json` containing `[]`. Existing files are never overwritten.

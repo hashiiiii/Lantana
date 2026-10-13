@@ -721,7 +721,7 @@ test "document and raw views support tree navigation, mouse input, and resizing 
     try session.drag(.{ .col = 29, .row = 3 }, .{ .col = 36, .row = 3 });
     try session.waitClipboard("Document");
     mark = session.screen.frame;
-    try session.send("m");
+    try session.send("R");
     _ = try session.waitFrame("   1│value 0", mark);
     mark = session.screen.frame;
     try session.send("jj");
@@ -828,7 +828,7 @@ test "plain git diff opens a configured external view and keeps raw mode availab
     try std.testing.expect(std.mem.indexOf(u8, document, "56ab913d6909e97bdd76f652f1431a2c49304120") != null);
     try std.testing.expect(std.mem.indexOf(u8, bodyRows(document), "before-renderer") == null);
     const mark = session.screen.frame;
-    try session.send("m");
+    try session.send("R");
     _ = try session.waitFrame("before-renderer", mark);
     try session.finish();
     try expectUnchanged(&repo, status, config);

@@ -3,7 +3,7 @@
     "quit": ["q"],
     "back": ["Escape"],
     "focus_next": ["Tab"],
-    "toggle_render_mode": ["m"]
+    "toggle_render_mode": ["Shift+r"]
   },
   "tree": {
     "move_up": ["Up", "k"],

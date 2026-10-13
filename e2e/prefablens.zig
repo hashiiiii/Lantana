@@ -64,7 +64,8 @@ test "PrefabLens renders semantic content in plain git diff and keeps mixed-file
     try std.testing.expect(std.mem.indexOf(u8, pty.bodyRows(semantic), "m_Name") == null);
     try std.testing.expect(std.mem.indexOf(u8, pty.bodyRows(semantic), "%YAML") == null);
     var mark = session.screen.frame;
-    try session.send("m");
+    // Matching PrefabLens's shortcut preserves the same raw-view operation between viewers.
+    try session.send("R");
     _ = try session.waitFrame("m_Name: Before", mark);
     mark = session.screen.frame;
     try session.send("\x1b");
