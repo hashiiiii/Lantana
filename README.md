@@ -78,8 +78,15 @@ Scroll with Up/Down or `j`/`k`; press `q` to quit.
 Lantana displays external command output in the content pane. Press `m` to switch between this view and the raw diff.
 If no rule matches, source contents are unavailable, or rendering fails, Lantana shows the raw diff.
 
-The first time you view a diff, Lantana creates `renderers.json` containing `[]` beside [`keymap.json`](#keymap).
-Existing files are preserved. Edit `renderers.json`, then restart Lantana to apply changes.
+The first time you view a diff, Lantana creates `renderers.json` containing `[]`. Existing files are never overwritten.
+
+Edit the file at the path below, then restart Lantana to apply changes:
+
+| Environment | Path |
+| --- | --- |
+| `XDG_CONFIG_HOME` is nonempty | `$XDG_CONFIG_HOME/lantana/renderers.json` |
+| Windows | `%APPDATA%/lantana/renderers.json` |
+| macOS / Linux | `$HOME/.config/lantana/renderers.json` |
 
 #### Example: PrefabLens
 
