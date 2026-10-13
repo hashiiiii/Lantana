@@ -1,5 +1,5 @@
 const std = @import("std");
-const builtin = @import("builtin");
+const user_config = @import("user_config");
 const shared = @import("keymap");
 
 pub const Context = enum { global, tree, content, dialog };
@@ -41,20 +41,9 @@ pub fn loadDefaults(allocator: std.mem.Allocator) !Bindings {
 }
 
 pub fn loadUser(io: std.Io, allocator: std.mem.Allocator, env: *const std.process.Environ.Map, stderr: *std.Io.Writer) !Bindings {
-    const xdg = env.get("XDG_CONFIG_HOME");
-    const base = if (xdg != null and xdg.?.len != 0)
-        xdg.?
-    else if (builtin.os.tag == .windows)
-        env.get("APPDATA") orelse return loadDefaults(allocator)
-    else
-        try std.fs.path.join(allocator, &.{ env.get("HOME") orelse return loadDefaults(allocator), ".config" });
-    defer if (xdg == null or xdg.?.len == 0) {
-        if (builtin.os.tag != .windows) allocator.free(base);
-    };
-    if (base.len == 0) return loadDefaults(allocator);
-    const path = try std.fs.path.join(allocator, &.{ base, "lantana", "keymap.json" });
+    const path = try user_config.path(allocator, env, "keymap.json") orelse return loadDefaults(allocator);
     defer allocator.free(path);
-    const text = readOrCreateUserFile(io, allocator, path) catch |err| {
+    const text = user_config.readOrCreate(io, allocator, path, default_json) catch |err| {
         try stderr.print("{s}: could not load key bindings ({s})\n", .{ path, @errorName(err) });
         return error.InvalidKeymap;
     };
@@ -71,25 +60,5 @@ pub fn loadUser(io: std.Io, allocator: std.mem.Allocator, env: *const std.proces
             }
             break :blk error.InvalidKeymap;
         },
-    };
-}
-
-fn readOrCreateUserFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024)) catch |err| switch (err) {
-        error.FileNotFound => blk: {
-            try createDefaultFile(io, path);
-            break :blk try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
-        },
-        else => return err,
-    };
-}
-
-fn createDefaultFile(io: std.Io, path: []const u8) !void {
-    var file = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .make_path = true });
-    defer file.deinit(io);
-    try file.file.writeStreamingAll(io, default_json);
-    file.link(io) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
     };
 }

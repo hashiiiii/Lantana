@@ -7,12 +7,14 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const vaxis_dep = b.dependency("vaxis", .{ .target = target, .optimize = optimize });
     const keymap = b.dependency("zig_keymap", .{ .target = target, .optimize = optimize }).module("keymap");
+    const user_config = b.createModule(.{ .root_source_file = b.path("src/user_config.zig"), .target = target, .optimize = optimize });
     const lantana = b.addModule("lantana", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .imports = &.{
             .{ .name = "vaxis", .module = vaxis_dep.module("vaxis") },
             .{ .name = "keymap", .module = keymap },
+            .{ .name = "user_config", .module = user_config },
         },
     });
     const options = b.addOptions();
@@ -24,6 +26,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "lantana", .module = lantana },
             .{ .name = "build_options", .module = options.createModule() },
+            .{ .name = "user_config", .module = user_config },
         },
     });
     const cli = b.addExecutable(.{
@@ -42,11 +45,15 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "vaxis", .module = vaxis_dep.module("vaxis") },
                 .{ .name = "keymap", .module = keymap },
+                .{ .name = "user_config", .module = user_config },
             },
         }),
     });
     const test_step = b.step("test", "Run unit and terminal integration tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
+    const cli_tests = b.addTest(.{ .name = "cli-unit-test", .root_module = cli_module });
+    test_step.dependOn(&b.addRunArtifact(cli_tests).step);
+    check_step.dependOn(&cli_tests.step);
     const terminal_options = b.addOptions();
     terminal_options.addOptionPath("pager_path", cli.getEmittedBin());
     if (target.result.os.tag != .windows) {
@@ -74,11 +81,12 @@ pub fn build(b: *std.Build) void {
             .imports = &.{.{ .name = "vaxis", .module = vaxis_dep.module("vaxis") }},
         }),
     });
-    terminal_tests.root_module.addImport("git_repo", b.createModule(.{
+    const git_repo = b.createModule(.{
         .root_source_file = b.path("tools/git_repo.zig"),
         .target = target,
         .optimize = optimize,
-    }));
+    });
+    terminal_tests.root_module.addImport("git_repo", git_repo);
     const terminal_screen = b.createModule(.{
         .root_source_file = b.path("tools/terminal_screen.zig"),
         .target = target,
@@ -91,6 +99,27 @@ pub fn build(b: *std.Build) void {
     if (target.result.os.tag == .linux) terminal_tests.root_module.linkSystemLibrary("util", .{});
     check_step.dependOn(&terminal_tests.step);
     test_step.dependOn(&b.addRunArtifact(terminal_tests).step);
+    if (target.result.os.tag != .windows) {
+        const prefab_options = b.addOptions();
+        prefab_options.addOptionPath("pager_path", cli.getEmittedBin());
+        prefab_options.addOption([]const u8, "prefablens_path", b.option([]const u8, "prefablens", "Installed PrefabLens executable for the optional integration test") orelse "prefablens");
+        const prefab_tests = b.addTest(.{
+            .name = "prefablens-test",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("e2e/prefablens.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+                .imports = &.{
+                    .{ .name = "git_repo", .module = git_repo },
+                    .{ .name = "terminal_screen", .module = terminal_screen },
+                },
+            }),
+        });
+        prefab_tests.root_module.addOptions("test_options", prefab_options);
+        if (target.result.os.tag == .linux) prefab_tests.root_module.linkSystemLibrary("util", .{});
+        b.step("test-prefablens", "Verify an installed PrefabLens renderer through Git and a real terminal").dependOn(&b.addRunArtifact(prefab_tests).step);
+    }
     const package_tests = b.addTest(.{
         .name = "package-test",
         .root_module = b.createModule(.{
@@ -103,6 +132,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(package_tests).step);
     const test_binaries_step = b.step("test-bins", "Install test executables for direct Windows runs");
     test_binaries_step.dependOn(&b.addInstallArtifact(tests, .{}).step);
+    test_binaries_step.dependOn(&b.addInstallArtifact(cli_tests, .{}).step);
     test_binaries_step.dependOn(&b.addInstallArtifact(terminal_tests, .{}).step);
     test_binaries_step.dependOn(&b.addInstallArtifact(package_tests, .{}).step);
     if (target.result.os.tag != .windows) {
@@ -185,6 +215,11 @@ pub fn build(b: *std.Build) void {
         const release_target_resolved = b.resolveTargetQuery(target_query);
         const release_vaxis = b.dependency("vaxis", .{ .target = release_target_resolved, .optimize = .ReleaseSafe });
         const release_keymap = b.dependency("zig_keymap", .{ .target = release_target_resolved, .optimize = .ReleaseSafe }).module("keymap");
+        const release_user_config = b.createModule(.{
+            .root_source_file = b.path("src/user_config.zig"),
+            .target = release_target_resolved,
+            .optimize = .ReleaseSafe,
+        });
         const release_lantana = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
             .target = release_target_resolved,
@@ -192,6 +227,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "vaxis", .module = release_vaxis.module("vaxis") },
                 .{ .name = "keymap", .module = release_keymap },
+                .{ .name = "user_config", .module = release_user_config },
             },
         });
         const release_cli_module = b.createModule(.{
@@ -201,6 +237,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "lantana", .module = release_lantana },
                 .{ .name = "build_options", .module = options.createModule() },
+                .{ .name = "user_config", .module = release_user_config },
             },
         });
         const release_cli = b.addExecutable(.{

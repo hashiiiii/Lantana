@@ -73,6 +73,61 @@ For `--project`, commit `.lantana.gitconfig` and run `lantana set --project` onc
 Select files with Up/Down, press Enter to focus the diff, and Esc to return to the tree.  
 Scroll with Up/Down or `j`/`k`; press `q` to quit.
 
+### External renderers
+
+Lantana displays external command output in the content pane. Press `m` to switch between this view and the raw diff.
+If no rule matches, source contents are unavailable, or rendering fails, Lantana shows the raw diff.
+
+The first time you view a diff, Lantana creates `renderers.json` containing `[]`. Existing files are never overwritten.
+
+Edit the file at the path below, then restart Lantana to apply changes:
+
+| Environment | Path |
+| --- | --- |
+| `XDG_CONFIG_HOME` is nonempty | `$XDG_CONFIG_HOME/lantana/renderers.json` |
+| Windows | `%APPDATA%/lantana/renderers.json` |
+| macOS / Linux | `$HOME/.config/lantana/renderers.json` |
+
+#### Example: PrefabLens
+
+Install [PrefabLens](https://github.com/hashiiiii/PrefabLens#installation) and put this in `renderers.json`:
+
+```json
+[
+  {
+    "patterns": ["*.prefab", "*.unity", "*.asset", "*.mat", "*.controller", "*.anim"],
+    "command": ["prefablens", "--color", "--project", "{repo}", "{before}", "{after}"]
+  }
+]
+```
+
+Run `lantana set`, then `git diff` in the repository. Matching UnityYAML files show their semantic diff.
+For a Unity project nested inside a repository, replace `{repo}` after `--project` with its absolute directory.
+
+#### Other commands
+
+Each rule requires `patterns` and `command`. The first matching rule wins.
+
+| Field | Value |
+| --- | --- |
+| `patterns` | Array of path patterns relative to the repository root. Matching is case-sensitive. `*` matches any text, including `/`; other characters are literal. |
+| `command` | JSON array containing the executable and its arguments. Use an executable in `PATH` or an absolute path. |
+| `timeout_ms` | Optional timeout in milliseconds, from `1` to `60000`. Defaults to `10000`. |
+
+Commands run from the repository root without a shell. Each placeholder must be a separate argument:
+
+| Placeholder | Value |
+| --- | --- |
+| `{before}` | Absolute path to a temporary file with the full contents before the change |
+| `{after}` | Absolute path to a temporary file with the full contents after the change |
+| `{path}` | Repository-relative changed path; new path for a rename |
+| `{repo}` | Absolute repository root |
+
+Temporary files keep the changed file's extension.
+The before file is empty for added files; the after file is empty for deleted files.
+Read these files and print nonempty UTF-8 text to stdout, then exit with status `0`.
+Lantana supports ANSI colors, bold, dim, and underline.
+
 ### Keymap
 
 The first time you view a diff, Lantana creates `keymap.json` with the [default bindings](src/keymap.json).  
@@ -119,6 +174,16 @@ zig build check
 ```
 
 `zig build` installs `lantana` to `zig-out/bin/`.
+
+Applications embedding the Zig module can supply a [`DocumentRenderer`](src/root.zig).
+Successful documents open by default and remain switchable to raw.
+
+The optional PrefabLens compatibility test launches plain `git diff` with mixed UnityYAML and C# changes.
+It requires an installed executable and a POSIX terminal:
+
+```sh
+zig build test-prefablens -Dprefablens=/absolute/path/to/prefablens
+```
 
 Build release archives and package files:
 

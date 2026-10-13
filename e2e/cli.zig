@@ -8,6 +8,35 @@ fn path(arena: std.mem.Allocator, parts: []const []const u8) ![]const u8 {
     return std.fs.path.join(arena, parts);
 }
 
+test "invalid renderer configuration identifies the file and preserves patch stdout" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var scratch = std.testing.tmpDir(.{});
+    defer scratch.cleanup();
+    const root = try scratch.dir.realPathFileAlloc(io, ".", arena);
+    var environment = try isolatedEnvironment(arena, root);
+    defer environment.deinit();
+    try scratch.dir.createDirPath(io, "xdg/lantana");
+    try scratch.dir.writeFile(io, .{ .sub_path = "xdg/lantana/renderers.json", .data = "[{\"patterns\":[\"*.txt\"],\"command\":[]}]" });
+    const patch = "diff --git a/A.txt b/A.txt\n--- a/A.txt\n+++ b/A.txt\n@@ -1 +1 @@\n-before\n+after\n";
+    try scratch.dir.writeFile(io, .{ .sub_path = "input", .data = patch });
+    const input = try scratch.dir.openFile(io, "input", .{});
+    defer input.close(io);
+    const output = try scratch.dir.createFile(io, "output", .{});
+    defer output.close(io);
+    const errors = try scratch.dir.createFile(io, "errors", .{});
+    defer errors.close(io);
+    const executable = try std.Io.Dir.cwd().realPathFileAlloc(io, pager_path, arena);
+    var child = try std.process.spawn(io, .{ .argv = &.{executable}, .environ_map = &environment, .stdin = .{ .file = input }, .stdout = .{ .file = output }, .stderr = .{ .file = errors } });
+    defer child.kill(io);
+    // A configuration error must leave the piped comparison available outside the alternate screen.
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, try child.wait(io));
+    try std.testing.expectEqualStrings(patch, try scratch.dir.readFileAlloc(io, "output", arena, .limited(4096)));
+    const stderr = try scratch.dir.readFileAlloc(io, "errors", arena, .limited(4096));
+    try std.testing.expect(std.mem.indexOf(u8, stderr, "renderers.json: invalid renderer configuration") != null);
+}
+
 fn isolatedEnvironment(arena: std.mem.Allocator, root: []const u8) !std.process.Environ.Map {
     var environment = std.process.Environ.Map.init(arena);
     var base = try std.testing.environ.createMap(arena);
