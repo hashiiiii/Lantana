@@ -709,8 +709,6 @@ test "document and raw views support tree navigation, mouse input, and resizing 
     try repo.write("Assets/B.meta", "guid: after\n");
     try repo.write("Scripts/C.cs", "class C { int value = 2; }\n");
     try repo.write("Image.png", "\x89PNG\x00after");
-    // Caller-provided documents must remain usable when external command settings are invalid.
-    try repo.write(".git/xdg/lantana/renderers.json", "invalid renderer config\n");
     const status_before = try repo.git(&.{ "status", "--porcelain=v1" });
     const config_before = try repo.read(".git/config");
     var session = try Session.start(arena, std.testing.io, &repo, true);
@@ -766,6 +764,50 @@ test "document and raw views support tree navigation, mouse input, and resizing 
     try session.finish();
     try std.testing.expectEqualStrings(status_before, try repo.git(&.{ "status", "--porcelain=v1" }));
     try std.testing.expectEqualStrings(config_before, try repo.read(".git/config"));
+}
+
+test "caller-supplied renderer ignores invalid external command configuration" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try Repo.init(arena, std.testing.io);
+    defer repo.deinit();
+    try repo.setPager(document_pager_path);
+    try repo.write("Example.prefab", "before\n");
+    try repo.commit();
+    try repo.write("Example.prefab", "after\n");
+    // Caller-supplied renderers must work even when optional external command configuration is invalid.
+    try repo.write(".git/xdg/lantana/renderers.json", "invalid renderer config\n");
+    var session = try Session.start(arena, std.testing.io, &repo, false);
+    defer session.abort();
+    _ = try session.waitFrame("Document for Example.prefab", 0);
+    try session.finish();
+}
+
+test "staged renderer snapshots ignore later worktree edits" {
+    var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer memory.deinit();
+    const arena = memory.allocator();
+    var repo = try Repo.init(arena, std.testing.io);
+    defer repo.deinit();
+    try repo.setPager(pager_path);
+    try repo.write("Example.txt", "before-renderer\n");
+    try repo.commit();
+    try repo.write("Example.txt", "after-renderer\n");
+    _ = try repo.git(&.{ "add", "Example.txt" });
+    try repo.write("Example.txt", "unrelated current worktree\n");
+    try repo.write(".git/xdg/lantana/renderers.json",
+        \\[{"patterns":["*.txt"],"command":["git","hash-object","{before}","{after}"]}]
+    );
+    const status = try repo.git(&.{ "status", "--porcelain=v1" });
+    const config = try repo.read(".git/config");
+    var session = try Session.startStagedDiff(arena, std.testing.io, &repo);
+    defer session.abort();
+    // An external tool must receive the captured staged comparison, not the newer working file.
+    const document = try session.waitFrame("e54b134d78723b029c3a968a4526f6715e57721b", 0);
+    try std.testing.expect(std.mem.indexOf(u8, document, "56ab913d6909e97bdd76f652f1431a2c49304120") != null);
+    try session.finish();
+    try expectUnchanged(&repo, status, config);
 }
 
 test "plain git diff opens a configured external view and keeps raw mode available" {

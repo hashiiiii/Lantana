@@ -117,11 +117,13 @@ test "renderer processes enforce output and elapsed time limits" {
         .stderr_limit = .limited(16 * 1024),
         .timeout = .{ .deadline = std.Io.Clock.Timestamp.now(std.testing.io, .awake).addDuration(.{ .clock = .awake, .raw = .fromSeconds(5) }) },
     }));
-    if (builtin.os.tag == .windows) return;
-    // Closed output streams cannot bypass the deadline by moving the hang into child.wait.
+    // Stalled renderers must not block the viewer; POSIX also covers waits after closed output streams.
     const started = std.Io.Clock.now(.awake, std.testing.io);
     try std.testing.expectError(error.Timeout, run(arena, std.testing.io, .{
-        .argv = &.{ "sh", "-c", "exec 1>&- 2>&-; exec sleep 5" },
+        .argv = if (builtin.os.tag == .windows)
+            &.{ "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 5" }
+        else
+            &.{ "sh", "-c", "exec 1>&- 2>&-; exec sleep 5" },
         .stdout_limit = .limited(4 * 1024 * 1024),
         .stderr_limit = .limited(16 * 1024),
         .timeout = .{ .deadline = started.addDuration(.fromMilliseconds(50)).withClock(.awake) },

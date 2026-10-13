@@ -74,4 +74,4 @@ Verify an installed executable with this optional POSIX terminal test:
 zig build test-prefablens -Dprefablens=/absolute/path/to/prefablens
 ```
 
-The test launches plain `git diff` with mixed UnityYAML and C# changes, including a staged comparison with later worktree edits.
+The test launches plain `git diff` with mixed UnityYAML and C# changes.
