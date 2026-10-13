@@ -75,62 +75,15 @@ Scroll with Up/Down or `j`/`k`; press `q` to quit.
 
 ### External renderers
 
-Lantana runs user-configured commands to render file-specific views.
-Successful output opens in the content pane; press `m` to switch to the raw diff.
+Lantana displays external command output in the content pane. Press `m` to switch between this view and the raw diff.
+If no rule matches, source contents are unavailable, or rendering fails, Lantana shows the raw diff.
 
-The first diff session creates `renderers.json` containing `[]` beside `keymap.json`, preserving existing files.
-Edit it and restart Lantana:
-
-| Environment | Path |
-| --- | --- |
-| `XDG_CONFIG_HOME` is nonempty | `$XDG_CONFIG_HOME/lantana/renderers.json` |
-| Windows | `%APPDATA%/lantana/renderers.json` |
-| macOS / Linux | `$HOME/.config/lantana/renderers.json` |
-
-Only user configuration registers commands.
-
-#### Command contract
-
-Each rule requires `patterns` and `command`. Optional `timeout_ms` defaults to `10000` and accepts values from `1` through `60000`.
-
-Patterns match repository-relative paths, including folders. Matching is case-sensitive; `*` matches any substring, including `/`.
-Other characters are literal. The first matching rule wins.
-
-`command` is an argv array, invoked directly without a shell. Each placeholder must occupy one complete argument:
-
-| Argument | Value |
-| --- | --- |
-| `{before}` | Absolute path of the temporary before snapshot |
-| `{after}` | Absolute path of the temporary after snapshot |
-| `{path}` | Repository-relative changed path; new path for a rename |
-| `{repo}` | Absolute repository root |
-
-Commands run from `{repo}`, inherit the environment, and receive an empty stdin.
-Supply the executable through `PATH` or an absolute path. Additional arguments are passed literally.
-If supported, place `--` before path arguments so filenames remain operands.
-
-Viewers can use any language. Read the snapshots and print the view to stdout.
-Use `{path}` when file identity or extension matters.
-Return exit status `0` and nonempty UTF-8 text on stdout.
-ANSI SGR colors, bold, dim, and underline are supported; other terminal controls are removed before display.
-Each selected file is rendered once per session.
-
-Snapshots contain the captured comparison's full contents and retain the selected path's extension.
-Added files have an empty before snapshot; deleted files have an empty after snapshot.
-Snapshot files are deleted after the command finishes.
-
-Worktree contents are verified against the patch's blob ID. CRLF is normalized only when the resulting blob matches.
-Unverified clean-filter transformations fall back to raw.
-
-Lantana keeps the raw diff if sources cannot be verified.
-Failed commands, empty or invalid output, and timeouts also fall back to raw.
-Stdout is limited to 4 MiB; stderr is limited to 16 KiB. Every changed file remains available.
-
-Malformed configuration prints its path, preserves the original patch on stdout, and exits with status `2`.
+The first time you view a diff, Lantana creates `renderers.json` containing `[]` beside [`keymap.json`](#keymap).
+Existing files are preserved. Edit `renderers.json`, then restart Lantana to apply changes.
 
 #### Example: PrefabLens
 
-Install [PrefabLens](https://github.com/hashiiiii/PrefabLens#installation), then register it like any other external command:
+Install [PrefabLens](https://github.com/hashiiiii/PrefabLens#installation) and put this in `renderers.json`:
 
 ```json
 [
@@ -141,9 +94,32 @@ Install [PrefabLens](https://github.com/hashiiiii/PrefabLens#installation), then
 ]
 ```
 
-Run `lantana set` in the repository, then `git diff`.
-Matching UnityYAML files show their semantic diff; other files keep the raw diff.
+Run `lantana set`, then `git diff` in the repository. Matching UnityYAML files show their semantic diff.
 For a Unity project nested inside a repository, replace `{repo}` after `--project` with its absolute directory.
+
+#### Other commands
+
+Each rule requires `patterns` and `command`. The first matching rule wins.
+
+| Field | Value |
+| --- | --- |
+| `patterns` | Array of path patterns relative to the repository root. Matching is case-sensitive. `*` matches any text, including `/`; other characters are literal. |
+| `command` | JSON array containing the executable and its arguments. Use an executable in `PATH` or an absolute path. |
+| `timeout_ms` | Optional timeout in milliseconds, from `1` to `60000`. Defaults to `10000`. |
+
+Commands run from the repository root without a shell. Each placeholder must be a separate argument:
+
+| Placeholder | Value |
+| --- | --- |
+| `{before}` | Absolute path to a temporary file with the full contents before the change |
+| `{after}` | Absolute path to a temporary file with the full contents after the change |
+| `{path}` | Repository-relative changed path; new path for a rename |
+| `{repo}` | Absolute repository root |
+
+Temporary files keep the changed file's extension.
+The before file is empty for added files; the after file is empty for deleted files.
+Read these files and print nonempty UTF-8 text to stdout, then exit with status `0`.
+Lantana supports ANSI colors, bold, dim, and underline.
 
 ### Keymap
 
