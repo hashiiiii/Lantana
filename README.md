@@ -99,8 +99,42 @@ Install [PrefabLens](https://github.com/hashiiiii/PrefabLens#installation) and p
 ```json
 [
   {
-    "patterns": ["*.prefab", "*.unity", "*.asset", "*.mat", "*.controller", "*.anim"],
-    "command": ["prefablens", "--color", "--project", "{repo}", "{before}", "{after}"]
+    "patterns": [
+      "*.prefab",
+      "*.unity",
+      "*.asset",
+      "*.mat",
+      "*.controller",
+      "*.anim",
+      "*.overrideController",
+      "*.physicMaterial",
+      "*.physicsMaterial2D",
+      "*.playable",
+      "*.mask",
+      "*.brush",
+      "*.flare",
+      "*.fontsettings",
+      "*.guiskin",
+      "*.giparams",
+      "*.renderTexture",
+      "*.spriteatlas",
+      "*.spriteatlasv2",
+      "*.terrainlayer",
+      "*.mixer",
+      "*.shadervariants",
+      "*.preset",
+      "*.signal",
+      "*.lighting",
+      "*.scenetemplate"
+    ],
+    "command": [
+      "prefablens",
+      "--color",
+      "--project",
+      "{repo}",
+      "{before}",
+      "{after}"
+    ]
   }
 ]
 ```
