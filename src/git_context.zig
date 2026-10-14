@@ -25,8 +25,8 @@ pub const GitContext = struct {
         else
             "";
         const after = if (file.new_path != null)
-            (try self.blob(arena, file.new_blob orelse return null) orelse
-                try self.worktreeFile(arena, file.new_path.?, file.new_blob.?) orelse return null)
+            (try self.worktreeFile(arena, file.new_path.?, file.new_blob orelse return null) orelse
+                try self.blob(arena, file.new_blob.?) orelse return null)
         else
             "";
         return .{ .before = before, .after = after };
@@ -144,6 +144,8 @@ test "snapshot recovery rejects stale worktrees and retains already captured sou
     try std.testing.expect(try GitContext.load(&later, arena, file) == null);
     _ = try testGit(arena, directory, &.{ "add", "Example.txt" });
     const staged = try lantana.git_patch.parse(arena, try testGit(arena, directory, &.{ "diff", "--cached", "--no-color" }));
+    // Later worktree edits must not replace the version captured in the staged patch.
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "Example.txt", .data = "later worktree edit\n" });
     // A staged addition has an empty before side and comes from the object database.
     const added = staged.files[0];
     const staged_text = (try GitContext.load(&later, arena, .{ .patch = added.raw, .old_path = added.old_path, .new_path = added.new_path, .old_blob = added.old_blob, .new_blob = added.new_blob })).?;
