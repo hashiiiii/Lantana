@@ -53,7 +53,8 @@ fn hero(arena: std.mem.Allocator, changed: bool) ![]const u8 {
 
 fn scrollFile(arena: std.mem.Allocator, changed: bool) ![]const u8 {
     var data: std.ArrayList(u8) = .empty;
-    const long_text = "abcdefghijklmnopqrstuvwxyz0123456789" ** 5;
+    const repeated: [5][36]u8 = @splat("abcdefghijklmnopqrstuvwxyz0123456789".*);
+    const long_text: [180]u8 = @bitCast(repeated);
     for (0..180) |index| {
         try data.appendSlice(arena, try std.fmt.allocPrint(arena, "line {d:0>3} {s} value={d:0>4}\n", .{
             index,

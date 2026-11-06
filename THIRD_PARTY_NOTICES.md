@@ -1,15 +1,14 @@
 # Third-party notices
 
-Lantana uses [zig-keymap v0.5.1](https://github.com/hashiiiii/zig-keymap/tree/70d0ff631a713b0f4aa5f7604ff97fd58f78cb96) under Apache-2.0 for configurable key bindings.
+Lantana uses [zig-keymap v0.5.1](https://github.com/hashiiiii/zig-keymap/tree/2b5484b9b33bcdb4c8cac53876d241fa81cf9bc6) under Apache-2.0 for configurable key bindings.
 
-Lantana uses the pinned [libvaxis](https://github.com/rockorager/libvaxis/tree/c060d314930c5552b99a89278a6a695baf0352da) source.
-libvaxis depends on [zigimg](https://github.com/zigimg/zigimg/tree/d695acd97c02e57bb151e8f659d1280f5cd6ca70) and [uucode](https://github.com/jacobsandlund/uucode/tree/2826a37a4562284fdacd8fa029d49509cc9bffcd).
+Lantana uses the pinned [libvaxis](https://github.com/rockorager/libvaxis/tree/c1861acc835e42d6874f2b15744f472398fbdfb7) source.
+libvaxis depends on [uucode](https://github.com/jacobsandlund/uucode/tree/1fb73433bba5d93366c57f23ff2e9d7939746500).
 The notices below apply to these pinned versions.
 
 ## MIT-licensed code
 
 - libvaxis: Copyright (c) 2023 Tim Culverhouse.
-- zigimg: Copyright (c) 2019-2021 zigimg developers.
 - uucode: Copyright (c) 2026 Jacob Sandlund.
 - UTF-8 decoder used by uucode: Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>.
 

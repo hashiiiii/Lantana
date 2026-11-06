@@ -21,6 +21,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
+      - name: Zig and ZLS compatibility
+        run: .github/scripts/check-zig-toolchain.sh
       - name: Format
         run: zig fmt --check build.zig build.zig.zon src e2e tools
       - name: Tests
@@ -48,4 +50,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
       - name: Build release archives and check package metadata
-        run: zig build release -j2
+        run: |
+          zig build release -j2
+          zig build packages -- zig-out/release
