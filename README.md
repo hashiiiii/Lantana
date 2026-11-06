@@ -213,9 +213,6 @@ zig build check
 
 `zig build` installs `lantana` to `zig-out/bin/`.
 
-The toolchain pins Zig and ZLS to 0.17.0.
-CI checks that their major/minor versions match; patch versions may differ.
-
 Applications embedding the Zig module can supply a [`DocumentRenderer`](src/root.zig).
 Successful documents open by default and remain switchable to raw.
 

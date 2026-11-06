@@ -1,6 +1,6 @@
 # Third-party notices
 
-Lantana uses [zig-keymap v0.5.1](https://github.com/hashiiiii/zig-keymap/tree/2b5484b9b33bcdb4c8cac53876d241fa81cf9bc6) under Apache-2.0 for configurable key bindings.
+Lantana uses [zig-keymap v0.6.0](https://github.com/hashiiiii/zig-keymap/tree/v0.6.0) under Apache-2.0 for configurable key bindings.
 
 Lantana uses the pinned [libvaxis](https://github.com/rockorager/libvaxis/tree/c1861acc835e42d6874f2b15744f472398fbdfb7) source.
 libvaxis depends on [uucode](https://github.com/jacobsandlund/uucode/tree/1fb73433bba5d93366c57f23ff2e9d7939746500).
