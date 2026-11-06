@@ -1,11 +1,7 @@
 const std = @import("std");
 const Repo = @import("git_repo").Repo;
 
-const c = @cImport({
-    @cDefine("_WIN32_WINNT", "0x0A00");
-    @cDefine("NTDDI_VERSION", "0x0A000006");
-    @cInclude("windows.h");
-});
+const c = @import("terminal_c");
 
 pub const Result = struct {
     transcript: []const u8,

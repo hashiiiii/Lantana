@@ -461,7 +461,7 @@ test "horizontal panning stops when the longest source reaches its pane edge" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
-    const padding = [_]u8{'x'} ** 40;
+    const padding: [40]u8 = @splat('x');
     const before = try std.fmt.allocPrint(arena, "before-{s}-END\n", .{padding});
     var repo = try changedRepo(arena, "WideBefore.cs", before, "after\n");
     defer repo.deinit();
@@ -565,7 +565,7 @@ test "horizontal trackpad scrolling reveals a draggable bottom scrollbar" {
     var memory = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer memory.deinit();
     const arena = memory.allocator();
-    const padding = [_]u8{'x'} ** 100;
+    const padding: [100]u8 = @splat('x');
     const before = try std.fmt.allocPrint(arena, "before-{s}-END\n", .{padding});
     const after = try std.fmt.allocPrint(arena, "after-{s}-END\n", .{padding});
     var repo = try changedRepo(arena, "Wide.cs", before, after);

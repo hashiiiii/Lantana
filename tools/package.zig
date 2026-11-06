@@ -52,6 +52,15 @@ pub fn main(init: std.process.Init) !void {
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     const args = try init.minimal.args.toSlice(arena);
+    // Zig 0.17 forwards build arguments at execution time, so defaults and validation belong here.
+    if ((args.len == 4 or args.len == 5) and std.mem.eql(u8, args[1], "packages")) return render(
+        arena,
+        init.io,
+        args[2],
+        if (args.len == 5) args[4] else "dist",
+        args[3],
+        null,
+    );
     if ((args.len != 5 and args.len != 6) or !std.mem.eql(u8, args[1], "render")) return RenderError.InvalidArguments;
     try render(
         arena,
@@ -360,7 +369,7 @@ test "Scoop manifest pairs each Windows architecture with its archive checksum" 
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const hashes: ArchiveHashes = .{ .values = .{ "a" ** 64, "b" ** 64, "c" ** 64, "d" ** 64, "e" ** 64, "f" ** 64 } };
+    const hashes: ArchiveHashes = .{ .values = .{ "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" } };
 
     // The wrong architecture or checksum prevents Scoop from installing the matching executable.
     const json = try scoopManifest(arena, "2.3.4", &hashes);
@@ -375,8 +384,8 @@ test "Scoop manifest pairs each Windows architecture with its archive checksum" 
     try std.testing.expectEqual(@as(usize, 2), architecture.count());
     const x64 = architecture.get("64bit").?.object;
     try std.testing.expectEqualStrings("https://github.com/hashiiiii/Lantana/releases/download/v2.3.4/lantana-windows-x64.zip", x64.get("url").?.string);
-    try std.testing.expectEqualStrings("e" ** 64, x64.get("hash").?.string);
+    try std.testing.expectEqualStrings("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", x64.get("hash").?.string);
     const arm64 = architecture.get("arm64").?.object;
     try std.testing.expectEqualStrings("https://github.com/hashiiiii/Lantana/releases/download/v2.3.4/lantana-windows-arm64.zip", arm64.get("url").?.string);
-    try std.testing.expectEqualStrings("f" ** 64, arm64.get("hash").?.string);
+    try std.testing.expectEqualStrings("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", arm64.get("hash").?.string);
 }

@@ -1,19 +1,9 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const Repo = @import("git_repo").Repo;
 const Screen = @import("terminal_screen").Screen;
 const pager_path = @import("test_options").pager_path;
 
-const c = @cImport({
-    @cInclude("sys/ioctl.h");
-    @cInclude("sys/wait.h");
-    @cInclude("poll.h");
-    @cInclude("fcntl.h");
-    @cInclude("signal.h");
-    @cInclude("stdlib.h");
-    @cInclude("unistd.h");
-    if (builtin.os.tag == .linux) @cInclude("pty.h") else @cInclude("util.h");
-});
+const c = @import("terminal_c");
 
 pub const Session = struct {
     pub const Point = struct { col: usize, row: usize };
@@ -48,12 +38,12 @@ pub const Session = struct {
         errdefer _ = c.close(slave);
         const size: c.struct_winsize = .{ .ws_row = 24, .ws_col = 80, .ws_xpixel = 0, .ws_ypixel = 0 };
         if (c.ioctl(slave, c.TIOCSWINSZ, &size) != 0) return error.ResizeFailed;
-        const repo_path = try arena.dupeZ(u8, repo.path);
-        const config_path = try arena.dupeZ(u8, try std.fs.path.join(arena, &.{ repo.path, ".git", "xdg" }));
+        const repo_path = try arena.dupeSentinel(u8, repo.path, 0);
+        const config_path = try arena.dupeSentinel(u8, try std.fs.path.join(arena, &.{ repo.path, ".git", "xdg" }), 0);
         const pager_executable = try std.Io.Dir.cwd().realPathFileAlloc(io, pager_path, arena);
         const pager_dir = std.fs.path.dirname(pager_executable) orelse return error.MissingPagerDirectory;
         const inherited_path: []const u8 = if (c.getenv("PATH")) |path| std.mem.span(path) else "";
-        const pager_path_value = try arena.dupeZ(u8, try std.fmt.allocPrint(arena, "{s}:{s}", .{ pager_dir, inherited_path }));
+        const pager_path_value = try arena.dupeSentinel(u8, try std.fmt.allocPrint(arena, "{s}:{s}", .{ pager_dir, inherited_path }), 0);
         const screen = try Screen.init(arena, 80, 24);
         const child = c.fork();
         if (child < 0) return error.ForkFailed;
@@ -207,7 +197,7 @@ pub fn bodyRows(frame: []const u8) []const u8 {
 pub fn runDetached(arena: std.mem.Allocator, io: std.Io, input: []const u8) !DetachedResult {
     var config = std.testing.tmpDir(.{});
     defer config.cleanup();
-    const config_path = try arena.dupeZ(u8, try config.dir.realPathFileAlloc(io, ".", arena));
+    const config_path = try arena.dupeSentinel(u8, try config.dir.realPathFileAlloc(io, ".", arena), 0);
     var stdin_pipe: [2]c_int = .{ -1, -1 };
     var stdout_pipe: [2]c_int = .{ -1, -1 };
     if (c.pipe(&stdin_pipe) != 0) return error.PipeFailed;

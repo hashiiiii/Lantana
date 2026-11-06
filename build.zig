@@ -1,4 +1,5 @@
 const std = @import("std");
+const Translator = @import("translate_c").Translator;
 const zon = @import("build.zig.zon");
 const release_targets = @import("tools/release_targets.zig");
 
@@ -71,6 +72,11 @@ pub fn build(b: *std.Build) void {
         });
         terminal_options.addOptionPath("document_pager_path", document_pager.getEmittedBin());
     }
+    const terminal_c: Translator = .init(b.dependency("translate_c", .{}), .{
+        .c_source_file = b.path(if (target.result.os.tag == .windows) "e2e/windows_conpty.h" else "e2e/posix_pty.h"),
+        .target = target,
+        .optimize = optimize,
+    });
     const terminal_tests = b.addTest(.{
         .name = "terminal-test",
         .root_module = b.createModule(.{
@@ -87,6 +93,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     terminal_tests.root_module.addImport("git_repo", git_repo);
+    terminal_tests.root_module.addImport("terminal_c", terminal_c.mod);
     const terminal_screen = b.createModule(.{
         .root_source_file = b.path("tools/terminal_screen.zig"),
         .target = target,
@@ -113,6 +120,7 @@ pub fn build(b: *std.Build) void {
                 .imports = &.{
                     .{ .name = "git_repo", .module = git_repo },
                     .{ .name = "terminal_screen", .module = terminal_screen },
+                    .{ .name = "terminal_c", .module = terminal_c.mod },
                 },
             }),
         });
@@ -184,8 +192,8 @@ pub fn build(b: *std.Build) void {
     const archive_step = b.step("archive", "Build one release archive for the selected target");
     if (release_targets.forTarget(target.result)) |archive_target| {
         const archive_command = b.addSystemCommand(&.{ "zip", "-q", "-j" });
-        const archive_path = archive_command.addOutputFileArg(b.fmt("lantana-{s}.zip", .{archive_target.asset}));
-        archive_command.addArtifactArg(cli);
+        const archive_path = archive_command.addOutputFileArg2(b.fmt("lantana-{s}.zip", .{archive_target.asset}), .{ .make_absolute = true });
+        archive_command.addArtifactArg2(cli, .{ .make_absolute = true });
         const archive_install = b.addInstallFile(archive_path, b.fmt("release/lantana-{s}.zip", .{archive_target.asset}));
         archive_step.dependOn(&archive_install.step);
     } else {
@@ -195,20 +203,20 @@ pub fn build(b: *std.Build) void {
 
     const packages_step = b.step("packages", "Validate release archives and render package metadata");
     const package_run = b.addRunArtifact(package_tool);
-    package_run.addArg("render");
+    package_run.addArg("packages");
     package_run.addArg(zon.version);
-    const package_dist = if (b.args) |args| blk: {
-        if (args.len != 1) std.process.fatal("zig build packages expects exactly one archive directory after --\n", .{});
-        break :blk args[0];
-    } else "dist";
-    package_run.addArg(b.pathFromRoot(package_dist));
-    package_run.addArg(b.getInstallPath(.{ .custom = "packages" }, ""));
+    package_run.addDirectoryArg2(.{ .relative = .{
+        .base = .install_prefix,
+        .sub_path = "packages",
+    } }, .{ .make_absolute = true });
+    package_run.addPassthruArgs();
+    package_run.setCwd(b.path("."));
     package_run.stdio = .inherit;
     packages_step.dependOn(&package_run.step);
 
     const release_step = b.step("release", "Build all release archives and render package metadata");
-    const release_dist = b.getInstallPath(.{ .custom = "release" }, "");
-    const release_packages = b.getInstallPath(.{ .custom = "packages" }, "");
+    const release_dist: std.Build.LazyPath = .{ .relative = .{ .base = .install_prefix, .sub_path = "release" } };
+    const release_packages: std.Build.LazyPath = .{ .relative = .{ .base = .install_prefix, .sub_path = "packages" } };
     const release_package_run = b.addRunArtifact(package_tool);
     for (release_targets.targets) |release_target| {
         const target_query = std.Build.parseTargetQuery(.{ .arch_os_abi = release_target.query }) catch unreachable;
@@ -245,8 +253,8 @@ pub fn build(b: *std.Build) void {
             .root_module = release_cli_module,
         });
         const archive = b.addSystemCommand(&.{ "zip", "-q", "-j" });
-        const release_archive_path = archive.addOutputFileArg(b.fmt("lantana-{s}.zip", .{release_target.asset}));
-        archive.addArtifactArg(release_cli);
+        const release_archive_path = archive.addOutputFileArg2(b.fmt("lantana-{s}.zip", .{release_target.asset}), .{ .make_absolute = true });
+        archive.addArtifactArg2(release_cli, .{ .make_absolute = true });
         const release_install_archive = b.addInstallFile(release_archive_path, b.fmt("release/lantana-{s}.zip", .{release_target.asset}));
         release_step.dependOn(&release_install_archive.step);
         release_package_run.step.dependOn(&release_install_archive.step);
@@ -254,9 +262,9 @@ pub fn build(b: *std.Build) void {
 
     release_package_run.addArg("render");
     release_package_run.addArg(zon.version);
-    release_package_run.addArg(release_dist);
-    release_package_run.addArg(release_packages);
-    release_package_run.addArg(release_dist);
+    release_package_run.addDirectoryArg2(release_dist, .{ .make_absolute = true });
+    release_package_run.addDirectoryArg2(release_packages, .{ .make_absolute = true });
+    release_package_run.addDirectoryArg2(release_dist, .{ .make_absolute = true });
     release_package_run.stdio = .inherit;
     release_step.dependOn(&release_package_run.step);
 }

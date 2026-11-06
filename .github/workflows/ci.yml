@@ -21,6 +21,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
+      - name: Zig and ZLS compatibility
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const zig = (await exec.getExecOutput('zig', ['version'])).stdout.trim();
+            const zls = (await exec.getExecOutput('zls', ['--version'])).stdout.trim();
+            const stableVersion = /^(\d+\.\d+)\.\d+$/;
+            const zigRelease = zig.match(stableVersion)?.[1];
+            const zlsRelease = zls.match(stableVersion)?.[1];
+            if (!zigRelease || !zlsRelease) {
+              throw new Error('Expected stable Zig and ZLS releases.');
+            }
+            // Compilation never runs ZLS, which requires the same major/minor release as Zig.
+            if (zigRelease !== zlsRelease) {
+              throw new Error('Incompatible Zig and ZLS: major/minor versions must match.');
+            }
+            core.info('Zig and ZLS compatibility OK.');
       - name: Format
         run: zig fmt --check build.zig build.zig.zon src e2e tools
       - name: Tests
@@ -48,4 +65,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
       - name: Build release archives and check package metadata
-        run: zig build release -j2
+        run: |
+          zig build release -j2
+          zig build packages -- zig-out/release
