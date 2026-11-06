@@ -19,10 +19,10 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.6
       - name: Zig and ZLS compatibility
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         with:
           script: |
             const zig = (await exec.getExecOutput('zig', ['version'])).stdout.trim();
@@ -62,8 +62,8 @@ jobs:
   packages:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.6
       - name: Build release archives and check package metadata
         run: |
           zig build release -j2
