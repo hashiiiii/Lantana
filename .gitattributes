@@ -1,3 +1,4 @@
 *.zig text eol=lf
 *.zon text eol=lf
+*.sh text eol=lf
 src/fixtures/*.patch text eol=lf -whitespace
