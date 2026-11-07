@@ -430,7 +430,8 @@ test "file change counts and draggable pane dividers stay aligned" {
     // Dragging the shared outer border changes both source columns.
     var mark = session.screen.frame;
     try session.drag(.{ .col = 28, .row = 10 }, .{ .col = 36, .row = 10 });
-    const wider_tree = try session.waitFrame("after-one", mark);
+    // Press feedback redraws the old text before pointer movement changes its column.
+    const wider_tree = try session.waitFrameAtColumn("after-one", 63, mark);
     const moved_before = try cellColumn(wider_tree, "before-one");
     const moved_after = try cellColumn(wider_tree, "after-one");
     try std.testing.expect(moved_before > original_before);
@@ -439,7 +440,7 @@ test "file change counts and draggable pane dividers stay aligned" {
     // The inner border changes only the After column; Before remains anchored.
     mark = session.screen.frame;
     try session.drag(.{ .col = 58, .row = 10 }, .{ .col = 64, .row = 10 });
-    const wider_before = try session.waitFrame("after-one", mark);
+    const wider_before = try session.waitFrameAtColumn("after-one", 69, mark);
     try std.testing.expectEqual(moved_before, try cellColumn(wider_before, "before-one"));
     const final_after = try cellColumn(wider_before, "after-one");
     try std.testing.expect(final_after > moved_after);

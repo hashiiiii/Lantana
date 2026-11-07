@@ -19,17 +19,17 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.6
       - name: Validate input
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         with:
           script: |
             if (context.ref !== 'refs/heads/main') throw new Error('Run this workflow from main');
             if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(process.env.VERSION)) throw new Error('Version must be X.Y.Z');
       - name: Bump version
         run: bump-my-version bump --new-version "$VERSION"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: version-bump
           path: |
@@ -52,15 +52,15 @@ jobs:
           - x86_64-windows
           - aarch64-windows
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: version-bump
           path: .
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@v5.2.6
       - name: Build and archive
         run: zig build archive -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: binary-${{ matrix.target }}
           path: zig-out/release/*.zip
@@ -73,22 +73,22 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/create-github-app-token@v3
+      - uses: actions/create-github-app-token@v3.3.0
         id: app-token
         with:
           client-id: ${{ secrets.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: version-bump
           path: .
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@v5.2.6
       - name: Stage version bump
         run: git add -u
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: binary-*
           merge-multiple: true
@@ -119,17 +119,17 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/create-github-app-token@v3
+      - uses: actions/create-github-app-token@v3.3.0
         id: app-token
         with:
           client-id: ${{ secrets.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: hashiiiii
           repositories: Lantana,homebrew-tap,scoop-bucket
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
         with:
           ref: v${{ inputs.version }}
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@v5.2.6
       - name: Generate package files from release assets
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -137,7 +137,7 @@ jobs:
           gh release download "v$VERSION" --dir dist
           zig build packages -- dist
       - name: Publish generated package files
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |

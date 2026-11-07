@@ -1,7 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["customManagers:githubActionsVersions"],
   "dependencyDashboard": true,
-  "enabledManagers": ["github-actions", "mise"],
+  "enabledManagers": ["github-actions", "mise", "custom.regex"],
   "timezone": "Asia/Tokyo",
   "schedule": ["* * * * 1"],
   "updateNotScheduled": false,
