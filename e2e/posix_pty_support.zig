@@ -129,15 +129,25 @@ pub const Session = struct {
     }
 
     pub fn waitFrame(self: *Session, expected: []const u8, after: usize) ![]const u8 {
+        return self.waitFrameAtColumn(expected, null, after);
+    }
+
+    pub fn waitFrameAtColumn(self: *Session, expected: []const u8, column: ?usize, after: usize) ![]const u8 {
         const deadline = std.Io.Clock.now(.awake, self.io).nanoseconds + 8 * std.time.ns_per_s;
         while (std.Io.Clock.now(.awake, self.io).nanoseconds < deadline) {
             try self.pump();
             if (self.screen.frame > after) {
                 const visible = try self.screen.text();
-                if (std.mem.indexOf(u8, visible, expected) != null) return visible;
+                if (column) |wanted| {
+                    var lines = std.mem.splitScalar(u8, visible, '\n');
+                    while (lines.next()) |line| {
+                        const position = std.mem.indexOf(u8, line, expected) orelse continue;
+                        if (try std.unicode.utf8CountCodepoints(line[0..position]) == wanted) return visible;
+                    }
+                } else if (std.mem.indexOf(u8, visible, expected) != null) return visible;
             }
         }
-        std.log.err("missing frame text {s}; frame={d}; screen:\n{s}", .{ expected, self.screen.frame, try self.screen.text() });
+        std.log.err("missing frame text {s}; column={any}; frame={d}; screen:\n{s}", .{ expected, column, self.screen.frame, try self.screen.text() });
         return error.MissingFrameText;
     }
 
