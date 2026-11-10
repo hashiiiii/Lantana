@@ -12,10 +12,6 @@
             .url = "https://github.com/rockorager/libvaxis/archive/c1861acc835e42d6874f2b15744f472398fbdfb7.tar.gz",
             .hash = "vaxis-0.6.0-BWNV_GQaDQAz9DPyb2245fA-MbFe1MtOMwVQ08z9-v50",
         },
-        .translate_c = .{
-            .url = "git+https://codeberg.org/ziglang/translate-c#c11030012dc325d446474d17b78c242fd1d622ec",
-            .hash = "translate_c-2.0.2-Q_BUWvBNBwBgPKQJPblip6M7AHNK_IPNPmyv4rSIQMQc",
-        },
     },
     .paths = .{
         "build.zig",

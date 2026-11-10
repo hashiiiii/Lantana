@@ -1,5 +1,4 @@
 const std = @import("std");
-const Translator = @import("translate_c").Translator;
 const zon = @import("build.zig.zon");
 const release_targets = @import("tools/release_targets.zig");
 
@@ -72,11 +71,6 @@ pub fn build(b: *std.Build) void {
         });
         terminal_options.addOptionPath("document_pager_path", document_pager.getEmittedBin());
     }
-    const terminal_c: Translator = .init(b.dependency("translate_c", .{}), .{
-        .c_source_file = b.path(if (target.result.os.tag == .windows) "e2e/windows_conpty.h" else "e2e/posix_pty.h"),
-        .target = target,
-        .optimize = optimize,
-    });
     const terminal_tests = b.addTest(.{
         .name = "terminal-test",
         .root_module = b.createModule(.{
@@ -93,7 +87,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     terminal_tests.root_module.addImport("git_repo", git_repo);
-    terminal_tests.root_module.addImport("terminal_c", terminal_c.mod);
     const terminal_screen = b.createModule(.{
         .root_source_file = b.path("tools/terminal_screen.zig"),
         .target = target,
@@ -120,7 +113,6 @@ pub fn build(b: *std.Build) void {
                 .imports = &.{
                     .{ .name = "git_repo", .module = git_repo },
                     .{ .name = "terminal_screen", .module = terminal_screen },
-                    .{ .name = "terminal_c", .module = terminal_c.mod },
                 },
             }),
         });

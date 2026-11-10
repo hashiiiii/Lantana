@@ -1,9 +1,26 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Repo = @import("git_repo").Repo;
 const Screen = @import("terminal_screen").Screen;
 const pager_path = @import("test_options").pager_path;
 
-const c = @import("terminal_c");
+const c = std.c;
+
+extern "c" fn openpty(master: *c_int, slave: *c_int, name: ?[*]u8, termios: ?*const c.termios, size: ?*const c.winsize) c_int;
+extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+extern "c" fn unsetenv(name: [*:0]const u8) c_int;
+extern "c" fn execl(path: [*:0]const u8, arg0: [*:0]const u8, ...) c_int;
+
+const terminal = if (builtin.os.tag == .macos) struct {
+    // Darwin's resize request sets bit 31 and ioctl takes an unsigned long.
+    const set_window_size: c_ulong = 0x80087467;
+    const set_controlling_terminal: c_ulong = 0x20007461;
+    extern "c" fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
+} else struct {
+    const set_window_size = c.T.IOCSWINSZ;
+    const set_controlling_terminal = c.T.IOCSCTTY;
+    const ioctl = c.ioctl;
+};
 
 pub const Session = struct {
     pub const Point = struct { col: usize, row: usize };
@@ -33,11 +50,11 @@ pub const Session = struct {
     fn startWithPagination(arena: std.mem.Allocator, io: std.Io, repo: *Repo, wide_diff: bool, paginate: bool, staged: bool) !Session {
         var master: c_int = undefined;
         var slave: c_int = undefined;
-        if (c.openpty(&master, &slave, null, null, null) != 0) return error.OpenPtyFailed;
+        if (openpty(&master, &slave, null, null, null) != 0) return error.OpenPtyFailed;
         errdefer _ = c.close(master);
         errdefer _ = c.close(slave);
-        const size: c.struct_winsize = .{ .ws_row = 24, .ws_col = 80, .ws_xpixel = 0, .ws_ypixel = 0 };
-        if (c.ioctl(slave, c.TIOCSWINSZ, &size) != 0) return error.ResizeFailed;
+        const size: c.winsize = .{ .row = 24, .col = 80, .xpixel = 0, .ypixel = 0 };
+        if (terminal.ioctl(slave, terminal.set_window_size, &size) != 0) return error.ResizeFailed;
         const repo_path = try arena.dupeSentinel(u8, repo.path, 0);
         const config_path = try arena.dupeSentinel(u8, try std.fs.path.join(arena, &.{ repo.path, ".git", "xdg" }), 0);
         const pager_executable = try std.Io.Dir.cwd().realPathFileAlloc(io, pager_path, arena);
@@ -50,16 +67,16 @@ pub const Session = struct {
         if (child == 0) {
             _ = c.close(master);
             _ = c.setsid();
-            _ = c.ioctl(slave, c.TIOCSCTTY, @as(c_int, 0));
+            _ = terminal.ioctl(slave, terminal.set_controlling_terminal, @as(c_int, 0));
             for (0..3) |fd| _ = c.dup2(slave, @intCast(fd));
             if (slave > 2) _ = c.close(slave);
             _ = c.chdir(repo_path.ptr);
-            _ = c.unsetenv("GIT_PAGER");
-            _ = c.unsetenv("PAGER");
-            _ = c.setenv("PATH", pager_path_value.ptr, 1);
-            _ = c.setenv("TERM", "xterm-256color", 1);
+            _ = unsetenv("GIT_PAGER");
+            _ = unsetenv("PAGER");
+            _ = setenv("PATH", pager_path_value.ptr, 1);
+            _ = setenv("TERM", "xterm-256color", 1);
             // User remappings must not affect default-key regression cases.
-            _ = c.setenv("XDG_CONFIG_HOME", config_path.ptr, 1);
+            _ = setenv("XDG_CONFIG_HOME", config_path.ptr, 1);
             const command = if (staged)
                 "before=$(stty -g); git diff --cached; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\""
             else if (wide_diff)
@@ -68,7 +85,7 @@ pub const Session = struct {
                 "before=$(stty -g); git diff; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\""
             else
                 "before=$(stty -g); git --paginate diff; code=$?; after=$(stty -g); [ \"$before\" = \"$after\" ] || exit 94; exit \"$code\"";
-            _ = c.execl("/bin/sh", "sh", "-c", command.ptr, @as(?*anyopaque, null));
+            _ = execl("/bin/sh", "sh", "-c", command.ptr, @as(?*anyopaque, null));
             c._exit(127);
         }
         return .{ .arena = arena, .io = io, .master = master, .slave = slave, .child = child, .screen = screen };
@@ -77,7 +94,7 @@ pub const Session = struct {
     pub fn abort(self: *Session) void {
         if (self.finished) return;
         // The shell, Git, and pager share the session group; killing only the shell leaves a pager behind.
-        if (c.kill(-self.child, c.SIGKILL) != 0) _ = c.kill(self.child, c.SIGKILL);
+        if (c.kill(-self.child, .KILL) != 0) _ = c.kill(self.child, .KILL);
         var status: c_int = undefined;
         _ = c.waitpid(self.child, &status, 0);
         _ = c.close(self.master);
@@ -102,8 +119,8 @@ pub const Session = struct {
     }
 
     fn pump(self: *Session) !void {
-        var fd = c.struct_pollfd{ .fd = self.master, .events = c.POLLIN, .revents = 0 };
-        if (c.poll(&fd, 1, 100) <= 0) return;
+        var fd = c.pollfd{ .fd = self.master, .events = c.POLL.IN, .revents = 0 };
+        if (c.poll(@ptrCast(&fd), 1, 100) <= 0) return;
         var bytes: [65536]u8 = undefined;
         const count = c.read(self.master, &bytes, bytes.len);
         if (count <= 0) return;
@@ -118,13 +135,13 @@ pub const Session = struct {
     }
 
     pub fn resize(self: *Session, width: usize, height: usize) !void {
-        const size: c.struct_winsize = .{
-            .ws_row = @intCast(height),
-            .ws_col = @intCast(width),
-            .ws_xpixel = 0,
-            .ws_ypixel = 0,
+        const size: c.winsize = .{
+            .row = @intCast(height),
+            .col = @intCast(width),
+            .xpixel = 0,
+            .ypixel = 0,
         };
-        if (c.ioctl(self.slave, c.TIOCSWINSZ, &size) != 0) return error.ResizeFailed;
+        if (terminal.ioctl(self.slave, terminal.set_window_size, &size) != 0) return error.ResizeFailed;
         try self.screen.resize(width, height);
     }
 
@@ -178,7 +195,7 @@ pub const Session = struct {
         while (std.Io.Clock.now(.awake, self.io).nanoseconds < deadline) {
             try self.pump();
             var status: c_int = undefined;
-            const done = c.waitpid(self.child, &status, c.WNOHANG);
+            const done = c.waitpid(self.child, &status, c.W.NOHANG);
             if (done == self.child) {
                 self.finished = true;
                 _ = c.close(self.master);
@@ -228,24 +245,24 @@ pub fn runDetached(arena: std.mem.Allocator, io: std.Io, input: []const u8) !Det
     if (child == 0) {
         _ = c.setsid();
         // Detached fallback tests must not create first-run files in the developer's configuration.
-        _ = c.setenv("XDG_CONFIG_HOME", config_path.ptr, 1);
+        _ = setenv("XDG_CONFIG_HOME", config_path.ptr, 1);
         _ = c.close(stdin_pipe[1]);
         _ = c.close(stdout_pipe[0]);
         _ = c.dup2(stdin_pipe[0], 0);
         _ = c.dup2(stdout_pipe[1], 1);
-        const null_output = c.open("/dev/null", c.O_WRONLY);
+        const null_output = c.open("/dev/null", .{ .ACCMODE = .WRONLY });
         if (null_output >= 0) {
             _ = c.dup2(null_output, 2);
             _ = c.close(null_output);
         }
         _ = c.close(stdin_pipe[0]);
         _ = c.close(stdout_pipe[1]);
-        _ = c.execl(executable.ptr, executable.ptr, @as(?*anyopaque, null));
+        _ = execl(executable.ptr, executable.ptr, @as(?*anyopaque, null));
         c._exit(127);
     }
     var reaped = false;
     errdefer if (!reaped) {
-        _ = c.kill(child, c.SIGKILL);
+        _ = c.kill(child, .KILL);
         var ignored: c_int = undefined;
         _ = c.waitpid(child, &ignored, 0);
     };
@@ -265,8 +282,8 @@ pub fn runDetached(arena: std.mem.Allocator, io: std.Io, input: []const u8) !Det
     var output: std.ArrayList(u8) = .empty;
     const deadline = std.Io.Clock.now(.awake, io).nanoseconds + 5 * std.time.ns_per_s;
     while (std.Io.Clock.now(.awake, io).nanoseconds < deadline) {
-        var fd = c.struct_pollfd{ .fd = stdout_pipe[0], .events = c.POLLIN, .revents = 0 };
-        if (c.poll(&fd, 1, 100) <= 0) continue;
+        var fd = c.pollfd{ .fd = stdout_pipe[0], .events = c.POLL.IN, .revents = 0 };
+        if (c.poll(@ptrCast(&fd), 1, 100) <= 0) continue;
         var bytes: [8192]u8 = undefined;
         const count = c.read(stdout_pipe[0], &bytes, bytes.len);
         if (count == 0) {

@@ -1,7 +1,7 @@
 const std = @import("std");
 const Repo = @import("git_repo").Repo;
 
-const c = @import("terminal_c");
+const c = @import("windows_api.zig");
 
 pub const Result = struct {
     transcript: []const u8,
@@ -13,7 +13,7 @@ fn writePipe(handle: c.HANDLE, bytes: []const u8) !void {
     var offset: usize = 0;
     while (offset < bytes.len) {
         var written: c.DWORD = 0;
-        if (c.WriteFile(handle, bytes.ptr + offset, @intCast(bytes.len - offset), &written, null) == 0 or written == 0)
+        if (c.WriteFile(handle, bytes.ptr + offset, @intCast(bytes.len - offset), &written, null) == .FALSE or written == 0)
             return error.ConPtyWriteFailed;
         offset += written;
     }
@@ -47,7 +47,7 @@ fn environmentLessThan(_: void, left: EnvironmentEntry, right: EnvironmentEntry)
         @intCast(left.wide_key.len),
         right.wide_key.ptr,
         @intCast(right.wide_key.len),
-        1,
+        .TRUE,
     ) == c.CSTR_LESS_THAN;
 }
 
@@ -76,7 +76,7 @@ fn childEnvironment(arena: std.mem.Allocator, repo: *Repo) !std.process.Environ.
 fn drainPipe(handle: c.HANDLE) void {
     var bytes: [8192]u8 = undefined;
     var count: c.DWORD = 0;
-    while (c.ReadFile(handle, &bytes, bytes.len, &count, null) != 0 and count > 0) {}
+    while (c.ReadFile(handle, &bytes, bytes.len, &count, null) != .FALSE and count > 0) {}
 }
 
 fn closePseudoConsole(pseudoconsole: c.HPCON, output_read: *c.HANDLE, output_write: *c.HANDLE) void {
@@ -104,12 +104,12 @@ pub fn runConPtyWithExpected(arena: std.mem.Allocator, io: std.Io, repo: *Repo, 
     var input_write: c.HANDLE = null;
     var output_read: c.HANDLE = null;
     var output_write: c.HANDLE = null;
-    if (c.CreatePipe(&input_read, &input_write, null, 0) == 0) return error.ConPtyPipeFailed;
+    if (c.CreatePipe(&input_read, &input_write, null, 0) == .FALSE) return error.ConPtyPipeFailed;
     defer {
         if (input_read != null) _ = c.CloseHandle(input_read);
         if (input_write != null) _ = c.CloseHandle(input_write);
     }
-    if (c.CreatePipe(&output_read, &output_write, null, 0) == 0) return error.ConPtyPipeFailed;
+    if (c.CreatePipe(&output_read, &output_write, null, 0) == .FALSE) return error.ConPtyPipeFailed;
     defer {
         if (output_read != null) _ = c.CloseHandle(output_read);
         if (output_write != null) _ = c.CloseHandle(output_write);
@@ -127,7 +127,7 @@ pub fn runConPtyWithExpected(arena: std.mem.Allocator, io: std.Io, repo: *Repo, 
     _ = c.InitializeProcThreadAttributeList(null, 1, 0, &attribute_bytes);
     const storage = try arena.alignedAlloc(u8, .of(usize), attribute_bytes);
     const attributes: c.LPPROC_THREAD_ATTRIBUTE_LIST = @ptrCast(storage.ptr);
-    if (c.InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_bytes) == 0)
+    if (c.InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_bytes) == .FALSE)
         return error.InitializeAttributesFailed;
     defer c.DeleteProcThreadAttributeList(attributes);
     if (c.UpdateProcThreadAttribute(
@@ -138,12 +138,12 @@ pub fn runConPtyWithExpected(arena: std.mem.Allocator, io: std.Io, repo: *Repo, 
         @sizeOf(c.HPCON),
         null,
         null,
-    ) == 0) return error.UpdateAttributesFailed;
+    ) == .FALSE) return error.UpdateAttributesFailed;
 
     var startup: c.STARTUPINFOEXW = std.mem.zeroes(c.STARTUPINFOEXW);
     startup.StartupInfo.cb = @sizeOf(c.STARTUPINFOEXW);
     startup.lpAttributeList = attributes;
-    var process: c.PROCESS_INFORMATION = std.mem.zeroes(c.PROCESS_INFORMATION);
+    var process: c.PROCESS_INFORMATION = undefined;
     const command = try std.unicode.utf8ToUtf16LeAllocZ(arena, "git.exe --paginate diff");
     const directory = try std.unicode.utf8ToUtf16LeAllocZ(arena, repo.path);
     const environment = try childEnvironment(arena, repo);
@@ -157,21 +157,21 @@ pub fn runConPtyWithExpected(arena: std.mem.Allocator, io: std.Io, repo: *Repo, 
         // A redirected test runner can pass its pipe handles to Git despite the attached ConPTY.
         // Clearing them lets Windows fill Git's standard handles from its new console.
         for (standard_kinds) |kind| {
-            if (c.SetStdHandle(kind, null) == 0) return error.ClearStandardHandleFailed;
+            if (c.SetStdHandle(kind, null) == .FALSE) return error.ClearStandardHandleFailed;
         }
         const started = c.CreateProcessW(
             null,
             command.ptr,
             null,
             null,
-            0,
-            c.EXTENDED_STARTUPINFO_PRESENT | c.CREATE_UNICODE_ENVIRONMENT,
-            @ptrCast(@constCast(environment.slice.ptr)),
+            .FALSE,
+            .{ .extended_startupinfo_present = true, .create_unicode_environment = true },
+            environment.slice.ptr,
             directory.ptr,
             &startup.StartupInfo,
             &process,
         );
-        break :blk .{ .started = started != 0, .error_code = if (started == 0) c.GetLastError() else @as(c.DWORD, 0) };
+        break :blk .{ .started = started != .FALSE, .error_code = if (started == .FALSE) c.GetLastError() else @as(c.DWORD, 0) };
     };
     if (!launch.started) {
         std.log.err("CreateProcessW failed: {d}", .{launch.error_code});
@@ -200,10 +200,10 @@ pub fn runConPtyWithExpected(arena: std.mem.Allocator, io: std.Io, repo: *Repo, 
     const deadline = std.Io.Clock.now(.awake, io).nanoseconds + 20 * std.time.ns_per_s;
     while (std.Io.Clock.now(.awake, io).nanoseconds < deadline) {
         var available: c.DWORD = 0;
-        if (c.PeekNamedPipe(output_read, null, 0, null, &available, null) != 0 and available > 0) {
+        if (c.PeekNamedPipe(output_read, null, 0, null, &available, null) != .FALSE and available > 0) {
             var buffer: [65536]u8 = undefined;
             var count: c.DWORD = 0;
-            if (c.ReadFile(output_read, &buffer, @min(available, buffer.len), &count, null) == 0)
+            if (c.ReadFile(output_read, &buffer, @min(available, buffer.len), &count, null) == .FALSE)
                 return error.ConPtyReadFailed;
             try transcript.appendSlice(arena, buffer[0..count]);
             for (queries, answers, 0..) |query, answer, index| {
@@ -226,7 +226,7 @@ pub fn runConPtyWithExpected(arena: std.mem.Allocator, io: std.Io, repo: *Repo, 
             std.mem.indexOf(u8, transcript.items, "\x1b[?1049l") != null)
         {
             var exit_code: c.DWORD = undefined;
-            if (c.GetExitCodeProcess(process.hProcess, &exit_code) == 0) return error.ConPtyExitCodeFailed;
+            if (c.GetExitCodeProcess(process.hProcess, &exit_code) == .FALSE) return error.ConPtyExitCodeFailed;
             exited = true;
             return .{ .transcript = try transcript.toOwnedSlice(arena), .exit_code = exit_code, .sent_quit = sent_quit };
         }
